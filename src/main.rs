@@ -8,7 +8,7 @@ use wayland_client::{
     protocol::{wl_pointer, wl_registry},
     Connection, Dispatch, QueueHandle,
 };
-// Corrected import path for virtual pointer (removed 'unstable')
+// Corrected import path for virtual pointer
 use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1,
     zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1,
@@ -184,7 +184,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if device.is_none() {
             eprintln!("No keyboard device found via heuristics.");
-            // Fallback: Just grab the first device with keys? No, unsafe.
             // Better to warn.
             eprintln!("Warning: Auto-detection failed. Monitoring disabled.");
             return;
@@ -193,7 +192,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut device = device.unwrap();
         
         // Grab the device to prevent events from going to other applications
-        // This requires root privileges.
         if let Err(e) = device.grab() {
             eprintln!("Failed to grab input device: {}. Ensure you run with sufficient permissions (e.g., `sudo`).", e);
             return;
@@ -204,9 +202,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // fetch_events blocks, so we don't need sleep
             if let Ok(events) = device.fetch_events() {
                  for event in events {
-                     // destructure() returns EventSummary which simplifies handling
-                    if let evdev::EventSummary::Key(_, key) = event.destructure() {
-                        if event.value() == 1 && key == toggle_key {
+                     // destructure() returns EventSummary. Key takes 3 args: (_, key, value)
+                    if let evdev::EventSummary::Key(_, key, value) = event.destructure() {
+                        if value == 1 && key == toggle_key {
                             let mut enabled = clicking_enabled_clone.lock().unwrap();
                             *enabled = !*enabled; // Toggle the state
                             println!("Autoclicker toggled: {}", if *enabled { "ON" } else { "OFF" });
@@ -245,8 +243,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Compositor does not support zwlr_virtual_pointer_manager_v1. Cannot create virtual pointer. Are you running a wlroots-based compositor (Sway, Hyprland)?");
 
     // Create the virtual pointer
-    // Use None for seat to let compositor decide (or we might need to bind a seat first if required, but usually optional)
-    let virtual_pointer = virtual_pointer_manager.create_virtual_pointer(None, &qhandle, ());
+    // This interface does not have events, so it takes only the seat argument in 0.31
+    let virtual_pointer = virtual_pointer_manager.create_virtual_pointer(None);
 
     println!("Virtual pointer created. Autoclicker ready.");
 
@@ -257,15 +255,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if enabled {
             // Send button press
-            // Use 0 for time
-            virtual_pointer.button(0, 0, mouse_button, wl_pointer::ButtonState::Pressed);
+            // Request takes 3 args: (time, button, state)
+            virtual_pointer.button(0, mouse_button, wl_pointer::ButtonState::Pressed);
             virtual_pointer.frame(); // Commit the event
             conn.flush()?;
 
             thread::sleep(Duration::from_millis(10)); // Small delay for button down state
 
             // Send button release
-            virtual_pointer.button(0, 0, mouse_button, wl_pointer::ButtonState::Released);
+            virtual_pointer.button(0, mouse_button, wl_pointer::ButtonState::Released);
             virtual_pointer.frame(); // Commit the event
             conn.flush()?;
 
