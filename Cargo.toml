@@ -8,3 +8,4 @@ clap = { version = "4.5.51", features = ["derive"] }
 evdev = "0.13.2"
 wayland-client = "0.31.11"
 wayland-protocols = { version = "0.32.9", features = ["client", "unstable"] }
+wayland-protocols-wlr = { version = "0.3.0", features = ["client"] }

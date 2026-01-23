@@ -7,12 +7,13 @@ use std::{
 use wayland_client::{
     protocol::{wl_pointer, wl_registry},
     Connection, Dispatch, QueueHandle,
+    Proxy, // Added Proxy trait import for interface() method
 };
-use wayland_protocols::unstable::virtual_pointer::v1::client::{
-    zwp_virtual_pointer_manager_v1::ZwpVirtualPointerManagerV1,
-    zwp_virtual_pointer_v1::ZwpVirtualPointerV1,
+use wayland_protocols_wlr::unstable::virtual_pointer::v1::client::{
+    zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1,
+    zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1,
 };
-use evdev::{Device, EventType, Key};
+use evdev::{Device, InputEventKind, KeyCode};
 
 /// A powerful and fast autoclicker for Wayland.
 #[derive(Parser, Debug)]
@@ -33,8 +34,7 @@ struct Args {
 
 // AppState will hold our Wayland objects and the virtual pointer manager
 struct AppState {
-    virtual_pointer_manager: Option<ZwpVirtualPointerManagerV1>,
-    // We don't need to store the virtual_pointer here, as it's created and used in main.
+    virtual_pointer_manager: Option<ZwlrVirtualPointerManagerV1>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for AppState {
@@ -53,22 +53,22 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppState {
         } = event
         {
             // Bind to the virtual pointer manager if available
-            if interface == ZwpVirtualPointerManagerV1::interface().name {
+            if interface == ZwlrVirtualPointerManagerV1::interface().name {
                 println!("Found virtual pointer manager (version {})", version);
                 state.virtual_pointer_manager = Some(
-                    registry.bind::<ZwpVirtualPointerManagerV1, _, _>(name, version, qhandle, ()),
+                    registry.bind::<ZwlrVirtualPointerManagerV1, _, _>(name, version, qhandle, ()),
                 );
             }
         }
     }
 }
 
-// Dispatch for ZwpVirtualPointerManagerV1 (no events to handle for this object)
-impl Dispatch<ZwpVirtualPointerManagerV1, ()> for AppState {
+// Dispatch for ZwlrVirtualPointerManagerV1
+impl Dispatch<ZwlrVirtualPointerManagerV1, ()> for AppState {
     fn event(
         _state: &mut Self,
-        _proxy: &ZwpVirtualPointerManagerV1,
-        _event: <ZwpVirtualPointerManagerV1 as wayland_client::Proxy>::Event,
+        _proxy: &ZwlrVirtualPointerManagerV1,
+        _event: <ZwlrVirtualPointerManagerV1 as wayland_client::Proxy>::Event,
         _data: &(),
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
@@ -76,12 +76,12 @@ impl Dispatch<ZwpVirtualPointerManagerV1, ()> for AppState {
     }
 }
 
-// Dispatch for ZwpVirtualPointerV1 (no events to handle for this object)
-impl Dispatch<ZwpVirtualPointerV1, ()> for AppState {
+// Dispatch for ZwlrVirtualPointerV1
+impl Dispatch<ZwlrVirtualPointerV1, ()> for AppState {
     fn event(
         _state: &mut Self,
-        _proxy: &ZwpVirtualPointerV1,
-        _event: <ZwpVirtualPointerV1 as wayland_client::Proxy>::Event,
+        _proxy: &ZwlrVirtualPointerV1,
+        _event: <ZwlrVirtualPointerV1 as wayland_client::Proxy>::Event,
         _data: &(),
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
@@ -89,60 +89,60 @@ impl Dispatch<ZwpVirtualPointerV1, ()> for AppState {
     }
 }
 
-// Function to parse the toggle key string into an evdev::Key
-fn parse_toggle_key(key_str: &str) -> Option<Key> {
+// Function to parse the toggle key string into an evdev::KeyCode
+fn parse_toggle_key(key_str: &str) -> Option<KeyCode> {
     match key_str.to_uppercase().as_str() {
-        "F1" => Some(Key::KEY_F1),
-        "F2" => Some(Key::KEY_F2),
-        "F3" => Some(Key::KEY_F3),
-        "F4" => Some(Key::KEY_F4),
-        "F5" => Some(Key::KEY_F5),
-        "F6" => Some(Key::KEY_F6),
-        "F7" => Some(Key::KEY_F7),
-        "F8" => Some(Key::KEY_F8),
-        "F9" => Some(Key::KEY_F9),
-        "F10" => Some(Key::KEY_F10),
-        "F11" => Some(Key::KEY_F11),
-        "F12" => Some(Key::KEY_F12),
-        "X" => Some(Key::KEY_X),
-        "Z" => Some(Key::KEY_Z),
-        "C" => Some(Key::KEY_C),
-        "V" => Some(Key::KEY_V),
-        "B" => Some(Key::KEY_B),
-        "N" => Some(Key::KEY_N),
-        "M" => Some(Key::KEY_M),
-        "A" => Some(Key::KEY_A),
-        "S" => Some(Key::KEY_S),
-        "D" => Some(Key::KEY_D),
-        "W" => Some(Key::KEY_W),
-        "Q" => Some(Key::KEY_Q),
-        "E" => Some(Key::KEY_E),
-        "R" => Some(Key::KEY_R),
-        "T" => Some(Key::KEY_T),
-        "Y" => Some(Key::KEY_Y),
-        "U" => Some(Key::KEY_U),
-        "I" => Some(Key::KEY_I),
-        "O" => Some(Key::KEY_O),
-        "P" => Some(Key::KEY_P),
-        "K" => Some(Key::KEY_K),
-        "L" => Some(Key::KEY_L),
-        "J" => Some(Key::KEY_J),
-        "H" => Some(Key::KEY_H),
-        "G" => Some(Key::KEY_G),
-        "F" => Some(Key::KEY_F),
-        "BTN_LEFT" => Some(Key::BTN_LEFT),
-        "BTN_RIGHT" => Some(Key::BTN_RIGHT),
-        "BTN_MIDDLE" => Some(Key::BTN_MIDDLE),
+        "F1" => Some(KeyCode::KEY_F1),
+        "F2" => Some(KeyCode::KEY_F2),
+        "F3" => Some(KeyCode::KEY_F3),
+        "F4" => Some(KeyCode::KEY_F4),
+        "F5" => Some(KeyCode::KEY_F5),
+        "F6" => Some(KeyCode::KEY_F6),
+        "F7" => Some(KeyCode::KEY_F7),
+        "F8" => Some(KeyCode::KEY_F8),
+        "F9" => Some(KeyCode::KEY_F9),
+        "F10" => Some(KeyCode::KEY_F10),
+        "F11" => Some(KeyCode::KEY_F11),
+        "F12" => Some(KeyCode::KEY_F12),
+        "X" => Some(KeyCode::KEY_X),
+        "Z" => Some(KeyCode::KEY_Z),
+        "C" => Some(KeyCode::KEY_C),
+        "V" => Some(KeyCode::KEY_V),
+        "B" => Some(KeyCode::KEY_B),
+        "N" => Some(KeyCode::KEY_N),
+        "M" => Some(KeyCode::KEY_M),
+        "A" => Some(KeyCode::KEY_A),
+        "S" => Some(KeyCode::KEY_S),
+        "D" => Some(KeyCode::KEY_D),
+        "W" => Some(KeyCode::KEY_W),
+        "Q" => Some(KeyCode::KEY_Q),
+        "E" => Some(KeyCode::KEY_E),
+        "R" => Some(KeyCode::KEY_R),
+        "T" => Some(KeyCode::KEY_T),
+        "Y" => Some(KeyCode::KEY_Y),
+        "U" => Some(KeyCode::KEY_U),
+        "I" => Some(KeyCode::KEY_I),
+        "O" => Some(KeyCode::KEY_O),
+        "P" => Some(KeyCode::KEY_P),
+        "K" => Some(KeyCode::KEY_K),
+        "L" => Some(KeyCode::KEY_L),
+        "J" => Some(KeyCode::KEY_J),
+        "H" => Some(KeyCode::KEY_H),
+        "G" => Some(KeyCode::KEY_G),
+        "F" => Some(KeyCode::KEY_F),
+        "BTN_LEFT" => Some(KeyCode::BTN_LEFT),
+        "BTN_RIGHT" => Some(KeyCode::BTN_RIGHT),
+        "BTN_MIDDLE" => Some(KeyCode::BTN_MIDDLE),
         _ => None,
     }
 }
 
-// Function to parse the mouse button string into a wl_pointer::Button
+// Function to parse the mouse button string into a linux button code
 fn parse_mouse_button(button_str: &str) -> Option<u32> {
     match button_str.to_lowercase().as_str() {
-        "left" => Some(wl_pointer::Button::Left as u32),
-        "right" => Some(wl_pointer::Button::Right as u32),
-        "middle" => Some(wl_pointer::Button::Middle as u32),
+        "left" => Some(0x110),   // BTN_LEFT
+        "right" => Some(0x111),  // BTN_RIGHT
+        "middle" => Some(0x112), // BTN_MIDDLE
         _ => None,
     }
 }
@@ -171,19 +171,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     thread::spawn(move || {
         let mut device = None;
         // Try to find a keyboard device
-        for d in evdev::enumerate() {
-            if d.supported_events().contains(EventType::KEY) {
-                println!("Found input device: {} ({:?})", d.name().unwrap_or("unnamed"), d.physical_path().unwrap_or("unknown"));
-                // Heuristic: try to find a keyboard. This might need refinement.
-                // A more robust solution would be to let the user specify the device path.
-                if d.name().unwrap_or("").to_lowercase().contains("keyboard") || d.physical_path().unwrap_or("").to_lowercase().contains("kbd") {
+        for (_, d) in evdev::enumerate() {
+            if d.supported_events().contains(evdev::EventType::KEY) {
+                // Heuristic: try to find a keyboard.
+                if d.name().unwrap_or("").to_lowercase().contains("keyboard") || d.name().unwrap_or("").to_lowercase().contains("kbd") {
+                    println!("Found input device: {}", d.name().unwrap_or("unnamed"));
                     device = Some(d);
                     break;
                 }
             }
         }
 
-        let mut device = device.expect("No keyboard device found. Ensure you have permissions to read /dev/input/event*.");
+        if device.is_none() {
+            eprintln!("No keyboard device found via heuristics.");
+            // Fallback: Just grab the first device with keys? No, unsafe.
+            // Better to warn.
+            eprintln!("Warning: Auto-detection failed. Monitoring disabled.");
+            return;
+        }
+
+        let mut device = device.unwrap();
         
         // Grab the device to prevent events from going to other applications
         // This requires root privileges.
@@ -194,12 +201,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Grabbed input device: {}", device.name().unwrap_or("unnamed"));
 
         loop {
-            for event in device.fetch_events().unwrap() {
-                if let evdev::InputEventKind::Key(key_event) = event.kind() {
-                    if key_event.state() == evdev::KeyState::Pressed && key_event.key() == toggle_key {
-                        let mut enabled = clicking_enabled_clone.lock().unwrap();
-                        *enabled = !*enabled; // Toggle the state
-                        println!("Autoclicker toggled: {}", if *enabled { "ON" } else { "OFF" });
+            // fetch_events blocks, so we don't need sleep
+            if let Ok(events) = device.fetch_events() {
+                 for event in events {
+                    if let InputEventKind::Key(key) = event.kind() {
+                        if event.value() == 1 && key == toggle_key {
+                            let mut enabled = clicking_enabled_clone.lock().unwrap();
+                            *enabled = !*enabled; // Toggle the state
+                            println!("Autoclicker toggled: {}", if *enabled { "ON" } else { "OFF" });
+                        }
                     }
                 }
             }
@@ -207,7 +217,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // --- Wayland Connection and Clicking Logic (Main Thread) ---
-    let conn = Connection::connect_to_env()?;
+    // Connect to the Wayland server
+    let conn = match Connection::connect_to_env() {
+        Ok(c) => c,
+        Err(e) => {
+             eprintln!("Failed to connect to Wayland display: {}", e);
+             return Err(Box::new(e));
+        }
+    };
+
     let mut event_queue = conn.new_event_queue();
     let qhandle = event_queue.handle();
 
@@ -223,10 +241,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let virtual_pointer_manager = app_state
         .virtual_pointer_manager
-        .expect("Compositor does not support zwp_virtual_pointer_manager_v1. Cannot create virtual pointer.");
+        .expect("Compositor does not support zwlr_virtual_pointer_manager_v1. Cannot create virtual pointer. Are you running a wlroots-based compositor (Sway, Hyprland)?");
 
     // Create the virtual pointer
-    let virtual_pointer = virtual_pointer_manager.create_virtual_pointer(&qhandle, ());
+    // Use None for seat to let compositor decide (or we might need to bind a seat first if required, but usually optional)
+    let virtual_pointer = virtual_pointer_manager.create_virtual_pointer(None, &qhandle, ());
 
     println!("Virtual pointer created. Autoclicker ready.");
 
@@ -237,14 +256,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if enabled {
             // Send button press
-            virtual_pointer.button(conn.display().get_last_serial(), 0, mouse_button, wl_pointer::ButtonState::Pressed);
+            // Use 0 for time
+            virtual_pointer.button(0, 0, mouse_button, wl_pointer::ButtonState::Pressed);
             virtual_pointer.frame(); // Commit the event
             conn.flush()?;
 
             thread::sleep(Duration::from_millis(10)); // Small delay for button down state
 
             // Send button release
-            virtual_pointer.button(conn.display().get_last_serial(), 0, mouse_button, wl_pointer::ButtonState::Released);
+            virtual_pointer.button(0, 0, mouse_button, wl_pointer::ButtonState::Released);
             virtual_pointer.frame(); // Commit the event
             conn.flush()?;
 
