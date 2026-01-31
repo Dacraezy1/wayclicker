@@ -128,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .map_err(|e| format!("Failed to create virtual device: {}. (Did you run with sudo?)", e))?;
 
-    let mut virtual_device = Arc::new(Mutex::new(virtual_device));
+    let virtual_device = Arc::new(Mutex::new(virtual_device));
     let virtual_device_clone = Arc::clone(&virtual_device);
 
     // --- Keyboard Listener Thread ---
