@@ -80,10 +80,23 @@ class ClickerController {
   }
 
   void stop() {
-    // pkexec can sometimes be stubborn; killing the process group is safest
-    _process?.kill();
-    _process = null;
-    _logController.add("Service Stopped.");
+    if (_process != null) {
+      // Kill the Dart handle for pkexec
+      _process?.kill();
+
+      // Use 'pkill' with specific flags:
+      // -x prevents killing wayclicker_gui
+      // -u 0 Only kill if the process is running as root (the pkexec child)
+      Process.run('pkexec', ['pkill', '-x', '-u', '0', 'wayclicker']).then((
+        result,
+      ) {
+        if (result.exitCode == 0) {
+          _logController.add("\n[i] Service Stopped.");
+        }
+      });
+
+      _process = null;
+    }
   }
 
   void dispose() {
