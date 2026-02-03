@@ -51,6 +51,7 @@ jobs:
         cd gui
         flutter pub get
         flutter build linux --release
+        cd ..
 
     # 6. Bundle everything together
     - name: Package Release
@@ -80,4 +81,4 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: wayclicker-linux-x64.tar.gz
-        generate_release_notes: true
+        #generate_release_notes: true
