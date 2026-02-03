@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main", "master" ]
     tags:
-      - 'v*' # Trigger on tags like v1.0, v0.1.1, etc.
+      - 'v*' 
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
@@ -17,42 +17,68 @@ env:
 
 jobs:
   build:
-    name: Build Binary
+    name: Build Linux Bundle
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install Rust toolchain
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        override: true
+    # 1. Install Linux Build Dependencies
+    - name: Install All dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libwayland-dev libxkbcommon-dev pkg-config
 
-    - name: Build Release
+    # 2. Set up Rust
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    # 3. Set up Flutter
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+        cache: true
+
+    # 4. Build Rust CLI
+    - name: Build Rust Backend
       run: cargo build --release --verbose
 
-    # 1. Zip the binary before uploading (optional, but standard for releases)
-    - name: Package Binary
-      if: startsWith(github.ref, 'refs/tags/')
+    # 5. Build Flutter GUI
+    - name: Build Flutter Frontend
       run: |
-        cd target/release
-        tar -czvf wayclicker-linux-x86_64.tar.gz wayclicker
-        cd ../..
+        cd gui
+        flutter pub get
+        flutter build linux --release
+        cd ..
 
-    # 2. Upload Artifact to Actions Tab (Always happens on push/pull)
+    # 6. Bundle everything together
+    - name: Package Release
+      run: |
+        # Create a staging directory
+        mkdir -p wayclicker-release
+        
+        # Copy Flutter bundle (binary, libs, data)
+        cp -r gui/build/linux/x64/release/bundle/* wayclicker-release/
+        
+        # Copy Rust binary into the same folder
+        cp target/release/wayclicker wayclicker-release/
+        
+        # Zip it up
+        tar -czvf wayclicker-linux-x64.tar.gz wayclicker-release/
+
+    # 7. Upload Artifact (For every push)
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: wayclicker-binary
-        path: target/release/wayclicker
-        if-no-files-found: error
+        name: wayclicker-linux-bundle
+        path: wayclicker-linux-x64.tar.gz
 
-    # 3. Create Release and Upload Asset (Only happens on Tags)
+    # 8. Create Release (Only on Tags)
     - name: Release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: target/release/wayclicker-linux-x86_64.tar.gz
+        files: wayclicker-linux-x64.tar.gz
+        #generate_release_notes: true
