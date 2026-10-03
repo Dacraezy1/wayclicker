@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Wayclicker
+Comment=Universal Autoclicker for Linux (Wayland & X11)
+GenericName=Autoclicker
+Exec=wayclicker-gui
+Icon=wayclicker
+Terminal=false
+Type=Application
+Categories=Utility;Accessibility;
+Keywords=autoclicker;clicker;automation;wayland;x11;
+StartupNotify=true

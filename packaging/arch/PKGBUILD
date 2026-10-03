@@ -1,0 +1,34 @@
+# Maintainer: Dacraezy1 <https://github.com/Dacraezy1/wayclicker>
+pkgname=wayclicker
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="A powerful, universal autoclicker for Linux (Wayland & X11)"
+arch=('x86_64')
+url="https://github.com/Dacraezy1/wayclicker"
+license=('GPL-3.0')
+depends=('glibc' 'gtk3')
+makedepends=('cargo' 'git')
+optdepends=(
+    'polkit: for elevated uinput permissions via pkexec'
+)
+provides=('wayclicker')
+conflicts=('wayclicker')
+
+build() {
+    cargo build --release --locked
+}
+
+package() {
+    # Install CLI binary
+    install -Dm755 "target/release/wayclicker" "$pkgdir/usr/bin/wayclicker"
+
+    # Install Desktop Entry & Icon
+    install -Dm644 "wayclicker.desktop" "$pkgdir/usr/share/applications/wayclicker.desktop"
+    install -Dm644 "assets/wayclicker.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/wayclicker.svg"
+
+    # Install udev rule for uinput access
+    install -Dm644 "packaging/udev/99-wayclicker.rules" "$pkgdir/usr/lib/udev/rules.d/99-wayclicker.rules"
+
+    # Install License
+    install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

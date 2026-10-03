@@ -28,7 +28,7 @@ jobs:
     - name: Install All dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libwayland-dev libxkbcommon-dev pkg-config
+        sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libwayland-dev libxkbcommon-dev
 
     # 2. Set up Rust
     - name: Install Rust toolchain
@@ -56,29 +56,50 @@ jobs:
     # 6. Bundle everything together
     - name: Package Release
       run: |
-        # Create a staging directory
+        # Create staging directory
         mkdir -p wayclicker-release
         
         # Copy Flutter bundle (binary, libs, data)
         cp -r gui/build/linux/x64/release/bundle/* wayclicker-release/
         
-        # Copy Rust binary into the same folder
+        # Copy Rust binary into the release folder
         cp target/release/wayclicker wayclicker-release/
         
-        # Zip it up
+        # Copy installation scripts, desktop integration, and assets
+        cp install.sh wayclicker-release/
+        cp uninstall.sh wayclicker-release/
+        cp wayclicker.desktop wayclicker-release/
+        mkdir -p wayclicker-release/assets
+        cp -r assets/* wayclicker-release/assets/
+        mkdir -p wayclicker-release/packaging
+        cp -r packaging/* wayclicker-release/packaging/
+        
+        # Create Tarball
         tar -czvf wayclicker-linux-x64.tar.gz wayclicker-release/
 
-    # 7. Upload Artifact (For every push)
-    - name: Upload Artifact
+        # Build Debian package
+        ./packaging/debian/build_deb.sh
+
+    # 7. Upload Artifacts (For every push)
+    - name: Upload Linux Tarball Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: wayclicker-linux-bundle
+        name: wayclicker-linux-tarball
         path: wayclicker-linux-x64.tar.gz
+
+    - name: Upload Debian Package Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: wayclicker-debian-package
+        path: "*.deb"
+        if-no-files-found: warn
 
     # 8. Create Release (Only on Tags)
     - name: Release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: wayclicker-linux-x64.tar.gz
-        #generate_release_notes: true
+        fail_on_unmatched_files: false
+        files: |
+          wayclicker-linux-x64.tar.gz
+          *.deb

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="mouse" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded squircle -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bg)"/>
+
+  <!-- Mouse body -->
+  <path d="M64 26 C48 26 38 38 38 56 L38 78 C38 96 48 106 64 106 C80 106 90 96 90 78 L90 56 C90 38 80 26 64 26 Z" fill="url(#mouse)" stroke="#1e1b4b" stroke-width="2"/>
+
+  <!-- Center divider line -->
+  <line x1="64" y1="26" x2="64" y2="58" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Scroll wheel -->
+  <rect x="60" y="38" width="8" height="18" rx="4" fill="url(#accent)"/>
+
+  <!-- Click pulse waves -->
+  <path d="M42 22 C34 26 28 34 26 44" fill="none" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M34 14 C22 24 14 36 12 50" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+
+  <!-- Lightning / speed bolt -->
+  <polygon points="76,68 62,86 70,86 58,102 78,82 70,82" fill="#f59e0b"/>
+</svg>

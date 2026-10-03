@@ -11,28 +11,52 @@ class ClickerController {
 
   bool get isRunning => _process != null;
 
-  Future<String> _getSideBySidePath() async {
-    // This gets the path to the current running Flutter UI binary
-    final String executablePath = Platform.resolvedExecutable;
-    final String executableDir = File(executablePath).parent.path;
+  Future<String> _findBinaryPath() async {
+    // 1. Check side-by-side with running Flutter UI binary
+    try {
+      final String executablePath = Platform.resolvedExecutable;
+      final String executableDir = File(executablePath).parent.path;
+      final String sideBySide = '$executableDir/wayclicker';
+      final file = File(sideBySide);
+      if (await file.exists()) {
+        await Process.run('chmod', ['+x', sideBySide]);
+        return sideBySide;
+      }
+    } catch (_) {}
 
-    final String binPath = '$executableDir/wayclicker';
-
-    final file = File(binPath);
-    if (!await file.exists()) {
-      throw Exception("Binary not found at $binPath");
+    // 2. Check standard system install path
+    final localBin = File('/usr/local/bin/wayclicker');
+    if (await localBin.exists()) {
+      return localBin.path;
     }
 
-    // Ensure it's executable (just in case the user unzipped it without permissions)
-    await Process.run('chmod', ['+x', binPath]);
+    // 3. Check distribution package install path
+    final usrBin = File('/usr/bin/wayclicker');
+    if (await usrBin.exists()) {
+      return usrBin.path;
+    }
 
-    return binPath;
+    // 4. Try resolving through PATH
+    try {
+      final whichResult = await Process.run('which', ['wayclicker']);
+      if (whichResult.exitCode == 0) {
+        final path = whichResult.stdout.toString().trim();
+        if (path.isNotEmpty && await File(path).exists()) {
+          return path;
+        }
+      }
+    } catch (_) {}
+
+    throw Exception("Binary 'wayclicker' not found side-by-side, in /usr/local/bin, or in PATH.");
   }
 
   Future<void> start({
     required int interval,
     required String toggleKey,
+    required String targetType,
     required String button,
+    required String key,
+    required String mode,
   }) async {
     if (_process != null) return;
 
@@ -41,19 +65,27 @@ class ClickerController {
     _logController.add(_logBuffer);
 
     try {
-      final String path = await _getSideBySidePath();
+      final String path = await _findBinaryPath();
 
-      _process = await Process.start('pkexec', [
-        path, // Always use the full absolute path
+      final List<String> args = [
+        path,
         '--interval', interval.toString(),
         '--toggle-key', toggleKey,
-        '--button', button,
-      ]);
+        '--mode', mode,
+      ];
+
+      if (targetType == 'keyboard') {
+        args.addAll(['--key', key]);
+      } else {
+        args.addAll(['--button', button]);
+      }
+
+      _process = await Process.start('pkexec', args);
 
       // Handle standard output
       _process!.stdout.transform(utf8.decoder).listen((data) {
         _logBuffer += data;
-        _logController.add(_logBuffer); // Push the updated history to the UI
+        _logController.add(_logBuffer);
       });
 
       // Handle standard error (CLI errors)
@@ -91,7 +123,7 @@ class ClickerController {
         result,
       ) {
         if (result.exitCode == 0) {
-          _logController.add("\n[i] Service Stopped.");
+          _logController.add("\n[i] Service Stopped.\n");
         }
       });
 

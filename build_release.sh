@@ -16,6 +16,7 @@ cargo build --release
 # Build the Flutter GUI
 echo "Building Flutter GUI..."
 cd gui
+flutter pub get
 flutter build linux --release
 cd ..
 
@@ -30,6 +31,15 @@ cp -r "$FLUTTER_BUNDLE/." "$OUTPUT_DIR/"
 
 # Copy the CLI Binary into the output folder
 cp "$ROOT_DIR/target/release/wayclicker" "$OUTPUT_DIR/"
+
+# Copy installation scripts, desktop integration, and assets
+cp "$ROOT_DIR/install.sh" "$OUTPUT_DIR/"
+cp "$ROOT_DIR/uninstall.sh" "$OUTPUT_DIR/"
+cp "$ROOT_DIR/wayclicker.desktop" "$OUTPUT_DIR/"
+mkdir -p "$OUTPUT_DIR/assets"
+cp -r "$ROOT_DIR/assets/." "$OUTPUT_DIR/assets/"
+mkdir -p "$OUTPUT_DIR/packaging"
+cp -r "$ROOT_DIR/packaging/." "$OUTPUT_DIR/packaging/"
 
 echo "Done!"
 echo "Output Directory: $OUTPUT_DIR"
