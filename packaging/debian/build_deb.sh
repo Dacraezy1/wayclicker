@@ -2,7 +2,7 @@
 set -e
 
 # Script to build a Debian package (.deb)
-VERSION="${VERSION:-0.2.0}"
+VERSION="${VERSION:-0.2.1}"
 ARCH="amd64"
 PKG_DIR="wayclicker_${VERSION}_${ARCH}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -16,13 +16,21 @@ use std::{
 #[derive(Parser, Debug)]
 #[command(author = "Dacraezy1", version, about, long_about = None)]
 struct Args {
-    /// Interval between clicks in milliseconds (for click/repeat mode)
+    /// Interval between clicks in milliseconds (autoclick speed)
     #[arg(short, long, default_value_t = 100)]
     interval: u64,
 
-    /// Key to toggle the autoclicker on/off (e.g., F6, X, BTN_LEFT, BTN_SIDE)
+    /// Key or button to trigger the autoclicker (e.g., left, right, middle, F6, X, BTN_LEFT, BTN_SIDE)
     #[arg(short, long, default_value = "F6")]
     toggle_key: String,
+
+    /// Trigger activation mode: 'hold' (autoclick while held down) or 'toggle' (click to toggle on/off)
+    #[arg(long, default_value = "toggle")]
+    trigger_mode: String,
+
+    /// Hold-to-click flag: autoclick continuously only while holding down the trigger button/key
+    #[arg(long, default_value_t = false)]
+    hold_to_click: bool,
 
     /// Mouse button to click (left, right, middle, side, extra)
     #[arg(short, long)]
@@ -36,13 +44,19 @@ struct Args {
     #[arg(long)]
     target: Option<String>,
 
-    /// Mode of operation: 'click' (repeated clicking) or 'hold' (press and hold down)
+    /// Virtual action mode: 'click' (repeated clicking at interval) or 'hold' (hold button down)
     #[arg(short, long, default_value = "click")]
     mode: String,
 
-    /// Hold mode flag (shorthand for --mode hold)
+    /// Virtual hold flag (shorthand for --mode hold)
     #[arg(long, default_value_t = false)]
     hold: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TriggerMode {
+    Toggle, // Click once to toggle ON, click again to toggle OFF
+    Hold,   // Autoclick while held down, stop as soon as released
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,7 +170,7 @@ fn parse_keyboard_key(key_str: &str) -> Option<KeyCode> {
     }
 }
 
-// Function to parse toggle key (supports both keyboard keys and mouse buttons)
+// Function to parse toggle/trigger key (supports mouse buttons and keyboard keys)
 fn parse_toggle_key(key_str: &str) -> Option<KeyCode> {
     if let Some(code) = parse_mouse_button(key_str) {
         return Some(code);
@@ -164,7 +178,7 @@ fn parse_toggle_key(key_str: &str) -> Option<KeyCode> {
     parse_keyboard_key(key_str)
 }
 
-fn resolve_target(args: &Args) -> Result<ResolvedTarget, String> {
+fn resolve_target(args: &Args, toggle_str: &str) -> Result<ResolvedTarget, String> {
     if let Some(ref target_str) = args.target {
         if let Some(code) = parse_mouse_button(target_str) {
             return Ok(ResolvedTarget {
@@ -180,7 +194,7 @@ fn resolve_target(args: &Args) -> Result<ResolvedTarget, String> {
                 kind: TargetKind::Keyboard,
             });
         }
-        return Err(format!("Invalid target: '{}'. Must be a mouse button (left, right, middle, side, extra) or supported keyboard key.", target_str));
+        return Err(format!("Invalid target: '{}'. Must be a mouse button or supported keyboard key.", target_str));
     }
 
     if let Some(ref key_str) = args.key {
@@ -198,7 +212,7 @@ fn resolve_target(args: &Args) -> Result<ResolvedTarget, String> {
                 kind: TargetKind::Mouse,
             });
         }
-        return Err(format!("Invalid key: '{}'. Must be a supported keyboard key (e.g. G, F, Space, 1).", key_str));
+        return Err(format!("Invalid key: '{}'. Must be a supported keyboard key.", key_str));
     }
 
     if let Some(ref btn_str) = args.button {
@@ -219,7 +233,16 @@ fn resolve_target(args: &Args) -> Result<ResolvedTarget, String> {
         return Err(format!("Invalid mouse button: '{}'. Use 'left', 'right', 'middle', 'side', or 'extra'.", btn_str));
     }
 
-    // Default: left click
+    // Default: If trigger is a mouse button, default target to that same mouse button!
+    if let Some(code) = parse_mouse_button(toggle_str) {
+        return Ok(ResolvedTarget {
+            code,
+            name: toggle_str.to_lowercase(),
+            kind: TargetKind::Mouse,
+        });
+    }
+
+    // Otherwise default: left click
     Ok(ResolvedTarget {
         code: KeyCode::BTN_LEFT,
         name: "left".to_string(),
@@ -255,9 +278,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let toggle_key = parse_toggle_key(&args.toggle_key)
-        .ok_or_else(|| format!("Invalid toggle key: {}", args.toggle_key))?;
+        .ok_or_else(|| format!("Invalid toggle/trigger key: {}", args.toggle_key))?;
 
-    let target = resolve_target(&args)?;
+    let target = resolve_target(&args, &args.toggle_key)?;
+
+    let trigger_mode = if args.hold_to_click || args.trigger_mode.to_lowercase() == "hold" {
+        TriggerMode::Hold
+    } else {
+        TriggerMode::Toggle
+    };
 
     let action_mode = if args.hold || args.mode.to_lowercase() == "hold" {
         ActionMode::Hold
@@ -265,12 +294,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ActionMode::Click
     };
 
+    println!("======================================================");
+    println!("  Wayclicker Universal Linux Autoclicker (Wayland/X11) ");
+    println!("======================================================");
     println!(
-        "Wayclicker configured: Target = {:?} ({}), Mode = {:?}, Interval = {}ms, Toggle Key = {}",
-        target.kind, target.name, action_mode, args.interval, args.toggle_key
+        "Trigger Key/Button : {} ({:?})",
+        args.toggle_key, trigger_mode
     );
-    println!("To start/stop, press the '{}' key.", args.toggle_key);
-    println!("NOTE: This program needs permissions (sudo or uinput group) to create a virtual input device.");
+    println!(
+        "Action Target      : {:?} ({})",
+        target.kind, target.name
+    );
+    println!("Action Mode        : {:?}", action_mode);
+    println!("Autoclick Speed    : {}ms interval", args.interval);
+
+    match trigger_mode {
+        TriggerMode::Hold => {
+            println!("How to use         : HOLD DOWN '{}' to autoclick. Stops immediately when released.", args.toggle_key);
+        }
+        TriggerMode::Toggle => {
+            println!("How to use         : TAP '{}' once to start autoclicking, tap again to stop.", args.toggle_key);
+        }
+    }
+    println!("NOTE: Requires input device permissions (sudo, pkexec, or uinput group).");
+    println!("------------------------------------------------------");
 
     // Shared state for toggling the autoclicker and tracking shutdown
     let clicking_enabled = Arc::new(Mutex::new(false));
@@ -287,22 +334,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Warning: Could not set signal handler: {}", e);
     }
 
-    // --- Virtual Device Creation (uinput) ---
-    let mut keys = AttributeSet::<KeyCode>::new();
-    for code in all_supported_keycodes() {
-        keys.insert(code);
-    }
-
-    let virtual_device = VirtualDevice::builder()?
-        .name("Wayclicker Virtual Device")
-        .with_keys(&keys)?
-        .build()
-        .map_err(|e| format!("Failed to create virtual device: {}. (Did you run with sudo?)", e))?;
-
-    let virtual_device = Arc::new(Mutex::new(virtual_device));
-    let virtual_device_loop = Arc::clone(&virtual_device);
-
-    // --- Input Listener Threads ---
+    // --- Enumerate physical input devices BEFORE creating virtual device ---
     let mut candidate_devices = Vec::new();
     for (_, d) in evdev::enumerate() {
         if let Some(name) = d.name() {
@@ -331,28 +363,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // --- Virtual Device Creation (uinput) ---
+    let mut keys = AttributeSet::<KeyCode>::new();
+    for code in all_supported_keycodes() {
+        keys.insert(code);
+    }
+
+    let virtual_device = VirtualDevice::builder()?
+        .name("Wayclicker Virtual Device")
+        .with_keys(&keys)?
+        .build()
+        .map_err(|e| format!("Failed to create virtual device: {}. (Did you run with sudo?)", e))?;
+
+    let virtual_device = Arc::new(Mutex::new(virtual_device));
+    let virtual_device_loop = Arc::clone(&virtual_device);
+
     if candidate_devices.is_empty() {
-        eprintln!("No input device found to monitor for toggle key.");
+        eprintln!("No input device found to monitor for trigger key '{}'.", args.toggle_key);
         eprintln!("Warning: Monitoring disabled. Ensure you run with appropriate permissions.");
     } else {
+        let trigger_name = args.toggle_key.clone();
         for mut device in candidate_devices {
             let dev_name = device.name().unwrap_or("unnamed").to_string();
             println!("Monitoring input device: {}", dev_name);
             let toggler = Arc::clone(&clicking_enabled_clone);
             let run_flag = Arc::clone(&running);
+            let t_name = trigger_name.clone();
 
             thread::spawn(move || {
                 while run_flag.load(Ordering::Relaxed) {
                     if let Ok(events) = device.fetch_events() {
                         for event in events {
                             if let evdev::EventSummary::Key(_, key, value) = event.destructure() {
-                                if value == 1 && key == toggle_key {
-                                    let mut enabled = toggler.lock().unwrap();
-                                    *enabled = !*enabled;
-                                    println!(
-                                        "Autoclicker toggled: {}",
-                                        if *enabled { "ON" } else { "OFF" }
-                                    );
+                                if key == toggle_key {
+                                    match trigger_mode {
+                                        TriggerMode::Toggle => {
+                                            if value == 1 {
+                                                let mut enabled = toggler.lock().unwrap();
+                                                *enabled = !*enabled;
+                                                println!(
+                                                    "Autoclicker toggled: {}",
+                                                    if *enabled { "ON" } else { "OFF" }
+                                                );
+                                            }
+                                        }
+                                        TriggerMode::Hold => {
+                                            if value == 1 || value == 2 {
+                                                let mut enabled = toggler.lock().unwrap();
+                                                if !*enabled {
+                                                    *enabled = true;
+                                                    println!("Autoclicker: ACTIVE (holding {})", t_name);
+                                                }
+                                            } else if value == 0 {
+                                                let mut enabled = toggler.lock().unwrap();
+                                                if *enabled {
+                                                    *enabled = false;
+                                                    println!("Autoclicker: STOPPED (released {})", t_name);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -366,7 +436,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Action Loop (Main Thread) ---
     let click_interval = Duration::from_millis(args.interval.max(1));
-    let press_duration = Duration::from_millis(10.min(args.interval.max(2) / 2));
+    let press_duration = Duration::from_millis(5.min(args.interval.max(2) / 2));
     let mut is_pressed = false;
 
     while running_loop.load(Ordering::Relaxed) {
@@ -389,7 +459,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ]);
                     is_pressed = false;
                 }
-                thread::sleep(Duration::from_millis(20));
+                thread::sleep(Duration::from_millis(10));
             }
             ActionMode::Click => {
                 if enabled {
@@ -411,10 +481,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ]);
                     drop(v_dev);
 
-                    // Sleep remaining interval in responsive increments
+                    // Sleep remaining interval in small responsive increments (5ms)
                     let sleep_time = click_interval.saturating_sub(press_duration);
                     if sleep_time > Duration::ZERO {
-                        let step = Duration::from_millis(25);
+                        let step = Duration::from_millis(5);
                         let mut elapsed = Duration::ZERO;
                         while elapsed < sleep_time
                             && *clicking_enabled.lock().unwrap()
@@ -426,7 +496,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 } else {
-                    thread::sleep(Duration::from_millis(30));
+                    thread::sleep(Duration::from_millis(5));
                 }
             }
         }
@@ -476,51 +546,60 @@ mod tests {
         assert_eq!(parse_toggle_key("F6"), Some(KeyCode::KEY_F6));
         assert_eq!(parse_toggle_key("BTN_LEFT"), Some(KeyCode::BTN_LEFT));
         assert_eq!(parse_toggle_key("BTN_SIDE"), Some(KeyCode::BTN_SIDE));
+        assert_eq!(parse_toggle_key("left"), Some(KeyCode::BTN_LEFT));
+        assert_eq!(parse_toggle_key("right"), Some(KeyCode::BTN_RIGHT));
+        assert_eq!(parse_toggle_key("middle"), Some(KeyCode::BTN_MIDDLE));
         assert_eq!(parse_toggle_key("X"), Some(KeyCode::KEY_X));
     }
 
     #[test]
     fn test_resolve_target() {
-        // Default target
+        // Default target with F6 toggle
         let args_default = Args {
             interval: 100,
             toggle_key: "F6".to_string(),
+            trigger_mode: "toggle".to_string(),
+            hold_to_click: false,
             button: None,
             key: None,
             target: None,
             mode: "click".to_string(),
             hold: false,
         };
-        let target = resolve_target(&args_default).unwrap();
+        let target = resolve_target(&args_default, "F6").unwrap();
         assert_eq!(target.kind, TargetKind::Mouse);
         assert_eq!(target.code, KeyCode::BTN_LEFT);
+
+        // Auto-match target to mouse toggle key
+        let args_right = Args {
+            interval: 50,
+            toggle_key: "right".to_string(),
+            trigger_mode: "hold".to_string(),
+            hold_to_click: true,
+            button: None,
+            key: None,
+            target: None,
+            mode: "click".to_string(),
+            hold: false,
+        };
+        let target_right = resolve_target(&args_right, "right").unwrap();
+        assert_eq!(target_right.kind, TargetKind::Mouse);
+        assert_eq!(target_right.code, KeyCode::BTN_RIGHT);
 
         // Keyboard target
         let args_key = Args {
             interval: 50,
             toggle_key: "F6".to_string(),
+            trigger_mode: "toggle".to_string(),
+            hold_to_click: false,
             button: None,
             key: Some("G".to_string()),
             target: None,
             mode: "click".to_string(),
             hold: false,
         };
-        let target_key = resolve_target(&args_key).unwrap();
+        let target_key = resolve_target(&args_key, "F6").unwrap();
         assert_eq!(target_key.kind, TargetKind::Keyboard);
         assert_eq!(target_key.code, KeyCode::KEY_G);
-
-        // Target string
-        let args_target = Args {
-            interval: 50,
-            toggle_key: "F6".to_string(),
-            button: None,
-            key: None,
-            target: Some("right".to_string()),
-            mode: "hold".to_string(),
-            hold: true,
-        };
-        let target_t = resolve_target(&args_target).unwrap();
-        assert_eq!(target_t.kind, TargetKind::Mouse);
-        assert_eq!(target_t.code, KeyCode::BTN_RIGHT);
     }
 }

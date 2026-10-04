@@ -53,6 +53,7 @@ class ClickerController {
   Future<void> start({
     required int interval,
     required String toggleKey,
+    required String triggerMode,
     required String targetType,
     required String button,
     required String key,
@@ -71,6 +72,7 @@ class ClickerController {
         path,
         '--interval', interval.toString(),
         '--toggle-key', toggleKey,
+        '--trigger-mode', triggerMode,
         '--mode', mode,
       ];
 

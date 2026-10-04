@@ -1,6 +1,6 @@
 # Maintainer: Dacraezy1 <https://github.com/Dacraezy1/wayclicker>
 pkgname=wayclicker-bin
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="A powerful, universal autoclicker for Linux (Wayland & X11) - prebuilt binary with GUI"
 arch=('x86_64')

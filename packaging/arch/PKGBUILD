@@ -1,6 +1,6 @@
 # Maintainer: Dacraezy1 <https://github.com/Dacraezy1/wayclicker>
 pkgname=wayclicker
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="A powerful, universal autoclicker for Linux (Wayland & X11)"
 arch=('x86_64')
@@ -13,8 +13,14 @@ optdepends=(
 )
 provides=('wayclicker')
 conflicts=('wayclicker')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+
+if [ -f "$startdir/../../Cargo.toml" ]; then
+    source=()
+    sha256sums=()
+else
+    source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+    sha256sums=('SKIP')
+fi
 
 _get_source_root() {
     if [ -f "$startdir/../../Cargo.toml" ]; then

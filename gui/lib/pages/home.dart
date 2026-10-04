@@ -14,36 +14,31 @@ class _HomePageState extends State<HomePage> {
   late TextEditingController _intervalController;
 
   final List<String> _allToggleKeys = [
+    'left',
+    'right',
+    'middle',
+    'BTN_SIDE',
+    'BTN_EXTRA',
     // Function Keys
     ...List.generate(12, (i) => 'F${i + 1}'),
     // Number Keys
     ...List.generate(10, (i) => '$i'),
     // Alpha Keys
     ...List.generate(26, (i) => String.fromCharCode(65 + i)),
-    // Mouse Buttons
-    'BTN_LEFT',
-    'BTN_RIGHT',
-    'BTN_MIDDLE',
-    'BTN_SIDE',
-    'BTN_EXTRA',
     // Modifiers & Special
-    'SHIFT',
-    'CTRL',
-    'ALT',
     'SPACE',
     'ENTER',
     'TAB',
     'ESC',
+    'SHIFT',
+    'CTRL',
+    'ALT',
   ];
 
   final List<String> _allTargetKeys = [
-    // Alpha Keys
     ...List.generate(26, (i) => String.fromCharCode(65 + i)),
-    // Number Keys
     ...List.generate(10, (i) => '$i'),
-    // Function Keys
     ...List.generate(12, (i) => 'F${i + 1}'),
-    // Navigation & Modifiers
     'SPACE',
     'ENTER',
     'TAB',
@@ -65,14 +60,16 @@ class _HomePageState extends State<HomePage> {
   ];
 
   // Config state
-  double _interval = 100;
-  String _selectedToggleKey = 'F6';
+  double _interval = 50;
+  String _triggerMode = 'hold'; // 'hold' (autoclick while held) or 'toggle' (click to toggle on/off)
+  String _selectedToggleKey = 'left';
   String _targetType = 'mouse'; // 'mouse' or 'keyboard'
   String _selectedButton = 'left';
   String _selectedTargetKey = 'G';
-  String _actionMode = 'click'; // 'click' or 'hold'
+  String _actionMode = 'click'; // 'click' (pulse clicks) or 'hold' (continuous virtual hold)
 
   bool _isConfigLoaded = false;
+  bool _showAdvancedOptions = false;
 
   @override
   void initState() {
@@ -86,7 +83,8 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     setState(() {
       _interval = config.interval.toDouble();
-      _selectedToggleKey = _allToggleKeys.contains(config.toggleKey) ? config.toggleKey : 'F6';
+      _triggerMode = (config.triggerMode == 'toggle') ? 'toggle' : 'hold';
+      _selectedToggleKey = _allToggleKeys.contains(config.toggleKey) ? config.toggleKey : 'left';
       _targetType = (config.targetType == 'keyboard') ? 'keyboard' : 'mouse';
       _selectedButton = config.button;
       _selectedTargetKey = _allTargetKeys.contains(config.key) ? config.key : 'G';
@@ -100,6 +98,7 @@ class _HomePageState extends State<HomePage> {
     final config = WayclickConfig(
       interval: _interval.toInt(),
       toggleKey: _selectedToggleKey,
+      triggerMode: _triggerMode,
       targetType: _targetType,
       button: _selectedButton,
       key: _selectedTargetKey,
@@ -123,6 +122,26 @@ class _HomePageState extends State<HomePage> {
     _saveConfig();
   }
 
+  String _formatKeyDisplay(String key) {
+    switch (key.toLowerCase()) {
+      case 'left':
+      case 'btn_left':
+        return 'Left Click';
+      case 'right':
+      case 'btn_right':
+        return 'Right Click';
+      case 'middle':
+      case 'btn_middle':
+        return 'Middle Click';
+      case 'btn_side':
+        return 'Mouse Side (Back)';
+      case 'btn_extra':
+        return 'Mouse Extra (Forward)';
+      default:
+        return key;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -135,6 +154,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     final double maxSlider = (_interval > 5000) ? _interval : 5000;
+    final double cps = (_interval > 0) ? (1000.0 / _interval) : 0;
 
     return Scaffold(
       body: SafeArea(
@@ -146,210 +166,318 @@ class _HomePageState extends State<HomePage> {
               _buildHeader(colorScheme),
               const SizedBox(height: 20),
 
-              // --- Mode Selection (Click vs Hold) ---
-              _sectionHeader("Action Mode"),
+              // --- 1. Activation Mode Selection (Hold to Click vs Toggle) ---
+              _sectionHeader("Activation Mode"),
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: SegmentedButton<String>(
                   segments: const [
                     ButtonSegment(
-                      value: 'click',
-                      label: Text('Click (Repeat)'),
-                      icon: Icon(Icons.repeat),
-                    ),
-                    ButtonSegment(
                       value: 'hold',
-                      label: Text('Hold (Continuous)'),
+                      label: Text('Hold to Click (While Held)'),
                       icon: Icon(Icons.touch_app),
                     ),
+                    ButtonSegment(
+                      value: 'toggle',
+                      label: Text('Toggle (Tap On / Off)'),
+                      icon: Icon(Icons.toggle_on),
+                    ),
                   ],
-                  selected: {_actionMode},
+                  selected: {_triggerMode},
                   onSelectionChanged: (val) {
-                    setState(() => _actionMode = val.first);
+                    setState(() => _triggerMode = val.first);
                     _saveConfig();
                   },
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _triggerMode == 'hold'
+                    ? "✨ Autoclicks continuously only while holding down the button or key. Stops as soon as you let go."
+                    : "✨ Tap your hotkey once to start clicking continuously, tap again to stop.",
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.outline,
+                  fontStyle: FontStyle.italic,
                 ),
               ),
               const SizedBox(height: 20),
 
-              // --- Speed (Interval) Section ---
+              // --- 2. Button / Key Trigger Selection ---
               _sectionHeader(
-                _actionMode == 'hold'
-                    ? "Speed / Interval (Not needed in Hold mode)"
-                    : "Speed (Click Interval)",
+                _triggerMode == 'hold'
+                    ? "Hold Which Button to Autoclick?"
+                    : "Activation Hotkey / Button",
               ),
               const SizedBox(height: 8),
-              Opacity(
-                opacity: _actionMode == 'hold' ? 0.4 : 1.0,
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Slider(
-                            value: _interval.clamp(1, maxSlider),
-                            min: 1,
-                            max: maxSlider,
-                            onChanged: _actionMode == 'hold'
-                                ? null
-                                : (val) {
-                                    setState(() {
-                                      _interval = val;
-                                      _intervalController.text = val.toInt().toString();
-                                    });
-                                    _saveConfig();
-                                  },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: 100,
-                          child: TextField(
-                            controller: _intervalController,
-                            enabled: _actionMode != 'hold',
-                            keyboardType: TextInputType.number,
-                            decoration: InputDecoration(
-                              suffixText: 'ms',
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            onChanged: (text) {
-                              final parsed = int.tryParse(text);
-                              if (parsed != null && parsed > 0) {
-                                setState(() {
-                                  _interval = parsed.toDouble();
-                                });
-                                _saveConfig();
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    // Quick Interval Presets
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          _presetChip(10, '10ms'),
-                          _presetChip(50, '50ms'),
-                          _presetChip(100, '100ms'),
-                          _presetChip(500, '500ms'),
-                          _presetChip(1000, '1s'),
-                          _presetChip(2500, '2.5s'),
-                          _presetChip(5000, '5s'),
-                          _presetChip(10000, '10s'),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 32),
-
-              // --- Target Selection (Mouse vs Keyboard) ---
-              _sectionHeader("Action Target"),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 'mouse',
-                      label: Text('Mouse Button'),
-                      icon: Icon(Icons.mouse),
-                    ),
-                    ButtonSegment(
-                      value: 'keyboard',
-                      label: Text('Keyboard Key'),
-                      icon: Icon(Icons.keyboard),
-                    ),
-                  ],
-                  selected: {_targetType},
-                  onSelectionChanged: (val) {
-                    setState(() => _targetType = val.first);
-                    _saveConfig();
-                  },
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // If Target is Mouse
-              if (_targetType == 'mouse') ...[
+              if (_triggerMode == 'hold') ...[
+                // Quick preset for Left, Right, Middle, or Other
                 SizedBox(
                   width: double.infinity,
                   child: SegmentedButton<String>(
                     segments: const [
-                      ButtonSegment(value: 'left', label: Text('Left')),
-                      ButtonSegment(value: 'middle', label: Text('Middle')),
-                      ButtonSegment(value: 'right', label: Text('Right')),
-                      ButtonSegment(value: 'side', label: Text('Side')),
-                      ButtonSegment(value: 'extra', label: Text('Extra')),
+                      ButtonSegment(value: 'left', label: Text('Left Click')),
+                      ButtonSegment(value: 'right', label: Text('Right Click')),
+                      ButtonSegment(value: 'middle', label: Text('Middle Click')),
+                      ButtonSegment(value: 'custom', label: Text('Other Key')),
                     ],
-                    selected: {_selectedButton},
+                    selected: {
+                      ['left', 'right', 'middle'].contains(_selectedToggleKey)
+                          ? _selectedToggleKey
+                          : 'custom'
+                    },
                     onSelectionChanged: (val) {
-                      setState(() => _selectedButton = val.first);
+                      final selected = val.first;
+                      setState(() {
+                        if (selected == 'custom') {
+                          _selectedToggleKey = 'F6';
+                        } else {
+                          _selectedToggleKey = selected;
+                          // In hold-click mode, automatically align target button to trigger button
+                          _selectedButton = selected;
+                          _targetType = 'mouse';
+                        }
+                      });
                       _saveConfig();
                     },
                   ),
                 ),
+                if (!['left', 'right', 'middle'].contains(_selectedToggleKey)) ...[
+                  const SizedBox(height: 12),
+                  DropdownMenu<String>(
+                    expandedInsets: EdgeInsets.zero,
+                    initialSelection: _selectedToggleKey,
+                    enableSearch: true,
+                    menuHeight: 300,
+                    label: const Text("Select Custom Trigger Key / Mouse Button"),
+                    onSelected: (val) {
+                      if (val != null) {
+                        setState(() => _selectedToggleKey = val);
+                        _saveConfig();
+                      }
+                    },
+                    dropdownMenuEntries: _allToggleKeys.map((k) {
+                      return DropdownMenuEntry(
+                        value: k,
+                        label: _formatKeyDisplay(k),
+                        leadingIcon: k.contains('BTN') || ['left', 'right', 'middle'].contains(k)
+                            ? const Icon(Icons.mouse)
+                            : const Icon(Icons.keyboard),
+                      );
+                    }).toList(),
+                  ),
+                ],
               ] else ...[
-                // If Target is Keyboard Key
                 DropdownMenu<String>(
                   expandedInsets: EdgeInsets.zero,
-                  initialSelection: _selectedTargetKey,
+                  initialSelection: _selectedToggleKey,
                   enableSearch: true,
                   menuHeight: 300,
-                  label: const Text("Select Target Key (e.g. G, F, Space)"),
+                  label: const Text("Select Toggle Key / Mouse Button"),
                   onSelected: (val) {
                     if (val != null) {
-                      setState(() => _selectedTargetKey = val);
+                      setState(() => _selectedToggleKey = val);
                       _saveConfig();
                     }
                   },
-                  dropdownMenuEntries: _allTargetKeys.map((k) {
+                  dropdownMenuEntries: _allToggleKeys.map((k) {
                     return DropdownMenuEntry(
                       value: k,
-                      label: k,
-                      leadingIcon: const Icon(Icons.keyboard),
+                      label: _formatKeyDisplay(k),
+                      leadingIcon: k.contains('BTN') || ['left', 'right', 'middle'].contains(k)
+                          ? const Icon(Icons.mouse)
+                          : const Icon(Icons.keyboard),
                     );
                   }).toList(),
                 ),
               ],
               const Divider(height: 32),
 
-              // --- Activation Toggle Key ---
-              _sectionHeader("Activation Toggle Key"),
-              const SizedBox(height: 8),
-              DropdownMenu<String>(
-                expandedInsets: EdgeInsets.zero,
-                initialSelection: _selectedToggleKey,
-                enableSearch: true,
-                menuHeight: 300,
-                label: const Text("Select Toggle Key"),
-                onSelected: (val) {
-                  if (val != null) {
-                    setState(() => _selectedToggleKey = val);
-                    _saveConfig();
-                  }
-                },
-                dropdownMenuEntries: _allToggleKeys.map((k) {
-                  return DropdownMenuEntry(
-                    value: k,
-                    label: k,
-                    leadingIcon: k.contains('BTN')
-                        ? const Icon(Icons.mouse)
-                        : const Icon(Icons.keyboard),
-                  );
-                }).toList(),
+              // --- 3. Autoclicker Speed (Interval & CPS) ---
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _sectionHeader("Click Speed (Interval)"),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      "${cps.toStringAsFixed(cps >= 10 ? 0 : 1)} clicks/sec",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+                ],
               ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Slider(
+                      value: _interval.clamp(1, maxSlider),
+                      min: 1,
+                      max: maxSlider,
+                      onChanged: (val) {
+                        setState(() {
+                          _interval = val;
+                          _intervalController.text = val.toInt().toString();
+                        });
+                        _saveConfig();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 100,
+                    child: TextField(
+                      controller: _intervalController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        suffixText: 'ms',
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onChanged: (text) {
+                        final parsed = int.tryParse(text);
+                        if (parsed != null && parsed > 0) {
+                          setState(() {
+                            _interval = parsed.toDouble();
+                          });
+                          _saveConfig();
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // Quick Interval Presets
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _presetChip(10, '10ms (100 CPS)'),
+                    _presetChip(25, '25ms (40 CPS)'),
+                    _presetChip(50, '50ms (20 CPS)'),
+                    _presetChip(100, '100ms (10 CPS)'),
+                    _presetChip(250, '250ms'),
+                    _presetChip(500, '500ms'),
+                    _presetChip(1000, '1s'),
+                    _presetChip(3000, '3s'),
+                    _presetChip(5000, '5s'),
+                  ],
+                ),
+              ),
+              const Divider(height: 32),
+
+              // --- 4. Target Action (Button or Key) ---
+              InkWell(
+                onTap: () => setState(() => _showAdvancedOptions = !_showAdvancedOptions),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        _sectionHeader("Target to Click"),
+                        const SizedBox(width: 8),
+                        Text(
+                          _targetType == 'mouse'
+                              ? "(${_formatKeyDisplay(_selectedButton)})"
+                              : "(Key: $_selectedTargetKey)",
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: colorScheme.secondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Icon(
+                      _showAdvancedOptions ? Icons.expand_less : Icons.expand_more,
+                      size: 20,
+                      color: colorScheme.primary,
+                    ),
+                  ],
+                ),
+              ),
+              if (_showAdvancedOptions) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 'mouse',
+                        label: Text('Mouse Button'),
+                        icon: Icon(Icons.mouse),
+                      ),
+                      ButtonSegment(
+                        value: 'keyboard',
+                        label: Text('Keyboard Key'),
+                        icon: Icon(Icons.keyboard),
+                      ),
+                    ],
+                    selected: {_targetType},
+                    onSelectionChanged: (val) {
+                      setState(() => _targetType = val.first);
+                      _saveConfig();
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_targetType == 'mouse') ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'left', label: Text('Left')),
+                        ButtonSegment(value: 'middle', label: Text('Middle')),
+                        ButtonSegment(value: 'right', label: Text('Right')),
+                        ButtonSegment(value: 'side', label: Text('Side')),
+                        ButtonSegment(value: 'extra', label: Text('Extra')),
+                      ],
+                      selected: {_selectedButton},
+                      onSelectionChanged: (val) {
+                        setState(() => _selectedButton = val.first);
+                        _saveConfig();
+                      },
+                    ),
+                  ),
+                ] else ...[
+                  DropdownMenu<String>(
+                    expandedInsets: EdgeInsets.zero,
+                    initialSelection: _selectedTargetKey,
+                    enableSearch: true,
+                    menuHeight: 300,
+                    label: const Text("Select Target Key (e.g. G, F, Space)"),
+                    onSelected: (val) {
+                      if (val != null) {
+                        setState(() => _selectedTargetKey = val);
+                        _saveConfig();
+                      }
+                    },
+                    dropdownMenuEntries: _allTargetKeys.map((k) {
+                      return DropdownMenuEntry(
+                        value: k,
+                        label: k,
+                        leadingIcon: const Icon(Icons.keyboard),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ],
               const SizedBox(height: 28),
 
-              // --- Start/Stop Action Button ---
+              // --- 5. Start/Stop Action Button ---
               SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -362,6 +490,7 @@ class _HomePageState extends State<HomePage> {
                       await _controller.start(
                         interval: _interval.toInt(),
                         toggleKey: _selectedToggleKey,
+                        triggerMode: _triggerMode,
                         targetType: _targetType,
                         button: _selectedButton,
                         key: _selectedTargetKey,
@@ -390,9 +519,53 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 12),
 
-              // --- Live Console Output ---
+              // Active instructions badge
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: _controller.isRunning
+                      ? Colors.green.withAlpha(isDark ? 50 : 30)
+                      : colorScheme.surfaceContainerHighest.withAlpha(120),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _controller.isRunning ? Colors.green : Colors.transparent,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _controller.isRunning ? Icons.check_circle : Icons.info_outline,
+                      size: 20,
+                      color: _controller.isRunning ? Colors.green : colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _triggerMode == 'hold'
+                            ? (_controller.isRunning
+                                ? "RUNNING: Hold down ${_formatKeyDisplay(_selectedToggleKey)} with your hand to autoclick!"
+                                : "When started: HOLD DOWN ${_formatKeyDisplay(_selectedToggleKey)} to autoclick at ${_interval.toInt()}ms. Stops when released.")
+                            : (_controller.isRunning
+                                ? "RUNNING: Tap ${_formatKeyDisplay(_selectedToggleKey)} to toggle autoclicking ON/OFF."
+                                : "When started: TAP ${_formatKeyDisplay(_selectedToggleKey)} once to toggle ON, tap again to stop."),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _controller.isRunning
+                              ? (isDark ? Colors.lightGreenAccent : Colors.green.shade800)
+                              : colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // --- 6. Live Console Output ---
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -409,7 +582,7 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(height: 8),
               Container(
                 width: double.infinity,
-                height: 140,
+                height: 130,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: isDark
@@ -468,9 +641,7 @@ class _HomePageState extends State<HomePage> {
           fontSize: 11,
           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
         ),
-        onSelected: _actionMode == 'hold'
-            ? null
-            : (_) => _setInterval(value.toDouble()),
+        onSelected: (_) => _setInterval(value.toDouble()),
       ),
     );
   }

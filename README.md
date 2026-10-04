@@ -134,49 +134,55 @@ sudo wayclicker [OPTIONS]
 
 #### Options
 
-*   `-i, --interval <MS>`: Time in milliseconds between clicks (Default: `100`).
-*   `-t, --toggle-key <KEY>`: Key to toggle on/off (Default: `F6`). Supports `F1`-`F12`, `A`-`Z`, `0`-`9`, `BTN_LEFT`, `BTN_RIGHT`, `BTN_SIDE`, `SPACE`, etc.
+*   `-i, --interval <MS>`: Time in milliseconds between clicks / speed (Default: `100`).
+*   `-t, --toggle-key <KEY>`: Key or button to trigger the autoclicker (Default: `F6`). Supports `left`, `right`, `middle`, `BTN_SIDE`, `F1`-`F12`, `A`-`Z`, `SPACE`, etc.
+*   `--trigger-mode <MODE>`: Activation mode: `hold` (autoclick while held) or `toggle` (click to toggle on/off). Default: `toggle`.
+*   `--hold-to-click`: Shorthand flag for `--trigger-mode hold` (autoclicks continuously only while holding down the button/key, stops immediately when released).
 *   `-b, --button <BTN>`: Target mouse button (`left`, `right`, `middle`, `side`, `extra`).
 *   `-k, --key <KEY>`: Target keyboard key (e.g. `G`, `F`, `Space`, `Enter`, `1`, `W`).
 *   `--target <TARGET>`: Target button or key name.
-*   `-m, --mode <MODE>`: Action mode: `click` or `hold` (Default: `click`).
-*   `--hold`: Shorthand flag for `--mode hold`.
+*   `-m, --mode <MODE>`: Action mode: `click` (rapid pulse clicks) or `hold` (virtual button held down).
 
 #### Examples
 
-**1. Basic Clicker (Left-click every 100ms, toggle with F6):**
+**1. Hold-to-Click Left Mouse Button (Rapid-fires at 50ms while held):**
 ```bash
-sudo wayclicker
+sudo wayclicker --toggle-key left --hold-to-click --interval 50
 ```
 
-**2. Custom delay higher than 1000ms (Click every 5 seconds):**
+**2. Hold-to-Click Right Mouse Button (Rapid-fires at 25ms while held):**
+```bash
+sudo wayclicker --toggle-key right --hold-to-click --interval 25
+```
+
+**3. Hold-to-Click Middle Mouse Button:**
+```bash
+sudo wayclicker --toggle-key middle --hold-to-click --interval 50
+```
+
+**4. Hold down 'X' on keyboard to spam Left Click:**
+```bash
+sudo wayclicker --toggle-key X --hold-to-click --interval 30
+```
+
+**5. Classic Toggle Mode (Left-click every 100ms, toggle with F6):**
+```bash
+sudo wayclicker --toggle-key F6 --interval 100
+```
+
+**6. Custom delay higher than 1000ms (Click every 5 seconds):**
 ```bash
 sudo wayclicker --interval 5000 --button left
 ```
 
-**3. Hold Left Mouse Button continuously (Toggle with F6):**
-```bash
-sudo wayclicker --button left --hold
-```
-
-**4. Hold Right Mouse Button (Toggle with 'X'):**
-```bash
-sudo wayclicker --button right --hold --toggle-key X
-```
-
-**5. Automate pressing keyboard key 'G' every 2.5 seconds:**
+**7. Automate pressing keyboard key 'G' every 2.5 seconds:**
 ```bash
 sudo wayclicker --key G --interval 2500 --toggle-key F7
 ```
 
-**6. Hold down keyboard key 'F' continuously:**
+**8. Hold down keyboard key 'F' continuously:**
 ```bash
 sudo wayclicker --key F --hold --toggle-key F8
-```
-
-**7. Mouse side button toggle (BTN_SIDE):**
-```bash
-sudo wayclicker --toggle-key BTN_SIDE --button left --interval 50
 ```
 
 ---

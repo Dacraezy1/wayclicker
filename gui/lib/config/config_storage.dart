@@ -4,14 +4,16 @@ import 'dart:io';
 class WayclickConfig {
   int interval;
   String toggleKey;
+  String triggerMode; // 'hold' or 'toggle'
   String targetType; // 'mouse' or 'keyboard'
   String button; // 'left', 'middle', 'right', 'side', 'extra'
   String key; // 'G', 'F', 'SPACE', etc.
   String mode; // 'click' or 'hold'
 
   WayclickConfig({
-    this.interval = 100,
-    this.toggleKey = 'F6',
+    this.interval = 50,
+    this.toggleKey = 'left',
+    this.triggerMode = 'hold',
     this.targetType = 'mouse',
     this.button = 'left',
     this.key = 'G',
@@ -21,6 +23,7 @@ class WayclickConfig {
   Map<String, dynamic> toJson() => {
     'interval': interval,
     'toggleKey': toggleKey,
+    'triggerMode': triggerMode,
     'targetType': targetType,
     'button': button,
     'key': key,
@@ -29,8 +32,9 @@ class WayclickConfig {
 
   factory WayclickConfig.fromJson(Map<String, dynamic> json) {
     return WayclickConfig(
-      interval: (json['interval'] as num?)?.toInt() ?? 100,
-      toggleKey: json['toggleKey'] as String? ?? 'F6',
+      interval: (json['interval'] as num?)?.toInt() ?? 50,
+      toggleKey: json['toggleKey'] as String? ?? 'left',
+      triggerMode: json['triggerMode'] as String? ?? 'hold',
       targetType: json['targetType'] as String? ?? 'mouse',
       button: json['button'] as String? ?? 'left',
       key: json['key'] as String? ?? 'G',
