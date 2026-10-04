@@ -1,0 +1,39 @@
+# Maintainer: Dacraezy1 <https://github.com/Dacraezy1/wayclicker>
+pkgname=wayclicker-bin
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="A powerful, universal autoclicker for Linux (Wayland & X11) - prebuilt binary with GUI"
+arch=('x86_64')
+url="https://github.com/Dacraezy1/wayclicker"
+license=('GPL-3.0')
+depends=('glibc' 'gtk3')
+optdepends=(
+    'polkit: for elevated uinput permissions via pkexec'
+)
+provides=('wayclicker' 'wayclicker-gui')
+conflicts=('wayclicker')
+source=("$url/releases/download/v$pkgver/wayclicker-linux-x64.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir/wayclicker-release"
+
+    # Install CLI binary
+    install -Dm755 "wayclicker" "$pkgdir/usr/bin/wayclicker"
+
+    # Install GUI application bundle
+    install -d "$pkgdir/usr/lib/wayclicker"
+    cp -r "wayclicker_gui" "lib" "data" "$pkgdir/usr/lib/wayclicker/" 2>/dev/null || true
+    chmod -R 755 "$pkgdir/usr/lib/wayclicker"
+
+    # Symlink GUI executable
+    install -d "$pkgdir/usr/bin"
+    ln -sf "/usr/lib/wayclicker/wayclicker_gui" "$pkgdir/usr/bin/wayclicker-gui"
+
+    # Install desktop entry and icon
+    install -Dm644 "wayclicker.desktop" "$pkgdir/usr/share/applications/wayclicker.desktop"
+    [ -f "assets/wayclicker.svg" ] && install -Dm644 "assets/wayclicker.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/wayclicker.svg"
+
+    # Install udev rule
+    [ -f "packaging/udev/99-wayclicker.rules" ] && install -Dm644 "packaging/udev/99-wayclicker.rules" "$pkgdir/usr/lib/udev/rules.d/99-wayclicker.rules"
+}

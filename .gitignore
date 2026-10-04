@@ -1,2 +1,11 @@
 /target
 /output
+*.pkg.tar.*
+*.tar.gz
+*.deb
+src/
+pkg/
+packaging/arch/src/
+packaging/arch/pkg/
+packaging/arch-bin/src/
+packaging/arch-bin/pkg/
