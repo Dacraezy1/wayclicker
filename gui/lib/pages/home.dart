@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:wayclicker_gui/config/config_storage.dart';
 import 'package:wayclicker_gui/runner/wayclick_runner.dart';
+import 'package:wayclicker_gui/widgets/key_bind_field.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -19,8 +22,8 @@ class _HomePageState extends State<HomePage> {
     'middle',
     'BTN_SIDE',
     'BTN_EXTRA',
-    // Function Keys
-    ...List.generate(12, (i) => 'F${i + 1}'),
+    // Function Keys (F1-F24)
+    ...List.generate(24, (i) => 'F${i + 1}'),
     // Number Keys
     ...List.generate(10, (i) => '$i'),
     // Alpha Keys
@@ -33,12 +36,23 @@ class _HomePageState extends State<HomePage> {
     'SHIFT',
     'CTRL',
     'ALT',
+    'SUPER',
+    'CAPSLOCK',
+    'INSERT',
+    'DELETE',
+    'HOME',
+    'END',
+    'PAGEUP',
+    'PAGEDOWN',
+    // Handy combo examples
+    'ctrl+alt+c',
+    'ctrl+shift+x',
   ];
 
   final List<String> _allTargetKeys = [
     ...List.generate(26, (i) => String.fromCharCode(65 + i)),
     ...List.generate(10, (i) => '$i'),
-    ...List.generate(12, (i) => 'F${i + 1}'),
+    ...List.generate(24, (i) => 'F${i + 1}'),
     'SPACE',
     'ENTER',
     'TAB',
@@ -49,8 +63,8 @@ class _HomePageState extends State<HomePage> {
     'ALT',
     'UP',
     'DOWN',
-    'LEFT',
-    'RIGHT',
+    'arrowleft',
+    'arrowright',
     'INSERT',
     'DELETE',
     'HOME',
@@ -70,11 +84,16 @@ class _HomePageState extends State<HomePage> {
 
   bool _isConfigLoaded = false;
   bool _showAdvancedOptions = false;
+  StreamSubscription<String>? _logSub;
 
   @override
   void initState() {
     super.initState();
     _intervalController = TextEditingController(text: _interval.toInt().toString());
+    // Refresh the Start/Stop button when the service exits on its own.
+    _logSub = _controller.logStream.listen((_) {
+      if (mounted) setState(() {});
+    });
     _loadConfig();
   }
 
@@ -84,11 +103,12 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _interval = config.interval.toDouble();
       _triggerMode = (config.triggerMode == 'toggle') ? 'toggle' : 'hold';
-      _selectedToggleKey = _allToggleKeys.contains(config.toggleKey) ? config.toggleKey : 'left';
+      _selectedToggleKey = config.toggleKey.trim().isEmpty ? 'left' : config.toggleKey.trim();
       _targetType = (config.targetType == 'keyboard') ? 'keyboard' : 'mouse';
       _selectedButton = config.button;
-      _selectedTargetKey = _allTargetKeys.contains(config.key) ? config.key : 'G';
+      _selectedTargetKey = config.key.trim().isEmpty ? 'G' : config.key.trim();
       _actionMode = (config.mode == 'hold') ? 'hold' : 'click';
+      _showAdvancedOptions = _targetType == 'keyboard';
       _intervalController.text = _interval.toInt().toString();
       _isConfigLoaded = true;
     });
@@ -109,6 +129,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _logSub?.cancel();
     _intervalController.dispose();
     _controller.dispose();
     super.dispose();
@@ -140,6 +161,85 @@ class _HomePageState extends State<HomePage> {
       default:
         return key;
     }
+  }
+
+  Widget _triggerField() {
+    return KeyBindField(
+      label: _triggerMode == 'hold'
+          ? 'Hold-to-activate key / button / combo'
+          : 'Toggle key / button / combo',
+      value: _selectedToggleKey,
+      presets: _allToggleKeys,
+      presetLabel: _formatKeyDisplay,
+      helper:
+          'Any key (F1-F24, ...), mouse button, or combo like ctrl+alt+c. Type it or press Record.',
+      onChanged: (v) {
+        setState(() => _selectedToggleKey = v);
+        _saveConfig();
+      },
+    );
+  }
+
+  String get _targetLabel =>
+      _targetType == 'mouse' ? _formatKeyDisplay(_selectedButton) : _selectedTargetKey;
+
+  String _statusText() {
+    final String trigger = _formatKeyDisplay(_selectedToggleKey);
+    final String target = _targetLabel;
+    final bool running = _controller.isRunning;
+    if (_triggerMode == 'hold') {
+      if (_actionMode == 'hold') {
+        return running
+            ? "RUNNING: Hold down $trigger to keep $target held down!"
+            : "When started: HOLD DOWN $trigger to keep $target held down. Released when you let go.";
+      }
+      return running
+          ? "RUNNING: Hold down $trigger with your hand to autoclick!"
+          : "When started: HOLD DOWN $trigger to autoclick at ${_interval.toInt()}ms. Stops when released.";
+    }
+    if (_actionMode == 'hold') {
+      return running
+          ? "RUNNING: Tap $trigger to hold $target down, tap again to release."
+          : "When started: TAP $trigger once to hold $target down, tap again to release.";
+    }
+    return running
+        ? "RUNNING: Tap $trigger to toggle autoclicking ON/OFF."
+        : "When started: TAP $trigger once to toggle ON, tap again to stop.";
+  }
+
+  Future<void> _onStartStop() async {
+    if (_controller.isRunning) {
+      _controller.stop();
+      setState(() {});
+      return;
+    }
+
+    _saveConfig();
+    final String? error = await _controller.validate(
+      toggleKey: _selectedToggleKey,
+      targetType: _targetType,
+      button: _selectedButton,
+      key: _selectedTargetKey,
+    );
+    if (error != null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), duration: const Duration(seconds: 5)),
+      );
+      setState(() {});
+      return;
+    }
+
+    await _controller.start(
+      interval: _interval.toInt(),
+      toggleKey: _selectedToggleKey,
+      triggerMode: _triggerMode,
+      targetType: _targetType,
+      button: _selectedButton,
+      key: _selectedTargetKey,
+      mode: _actionMode,
+    );
+    if (mounted) setState(() {});
   }
 
   @override
@@ -204,6 +304,44 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 20),
 
+              // --- 1b. Action Type (click repeatedly vs hold down) ---
+              _sectionHeader("Action Type"),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(
+                      value: 'click',
+                      label: Text('Click Repeatedly'),
+                      icon: Icon(Icons.repeat),
+                    ),
+                    ButtonSegment(
+                      value: 'hold',
+                      label: Text('Hold Down'),
+                      icon: Icon(Icons.pan_tool),
+                    ),
+                  ],
+                  selected: {_actionMode},
+                  onSelectionChanged: (val) {
+                    setState(() => _actionMode = val.first);
+                    _saveConfig();
+                  },
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _actionMode == 'hold'
+                    ? "✨ Presses the target button/key and keeps it held down (no repeated clicking) until you release / toggle off."
+                    : "✨ Presses and releases the target button/key over and over at the chosen interval.",
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.outline,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+              const SizedBox(height: 20),
+
               // --- 2. Button / Key Trigger Selection ---
               _sectionHeader(
                 _triggerMode == 'hold'
@@ -245,136 +383,117 @@ class _HomePageState extends State<HomePage> {
                 ),
                 if (!['left', 'right', 'middle'].contains(_selectedToggleKey)) ...[
                   const SizedBox(height: 12),
-                  DropdownMenu<String>(
-                    expandedInsets: EdgeInsets.zero,
-                    initialSelection: _selectedToggleKey,
-                    enableSearch: true,
-                    menuHeight: 300,
-                    label: const Text("Select Custom Trigger Key / Mouse Button"),
-                    onSelected: (val) {
-                      if (val != null) {
-                        setState(() => _selectedToggleKey = val);
-                        _saveConfig();
-                      }
-                    },
-                    dropdownMenuEntries: _allToggleKeys.map((k) {
-                      return DropdownMenuEntry(
-                        value: k,
-                        label: _formatKeyDisplay(k),
-                        leadingIcon: k.contains('BTN') || ['left', 'right', 'middle'].contains(k)
-                            ? const Icon(Icons.mouse)
-                            : const Icon(Icons.keyboard),
-                      );
-                    }).toList(),
-                  ),
+                  _triggerField(),
                 ],
               ] else ...[
-                DropdownMenu<String>(
-                  expandedInsets: EdgeInsets.zero,
-                  initialSelection: _selectedToggleKey,
-                  enableSearch: true,
-                  menuHeight: 300,
-                  label: const Text("Select Toggle Key / Mouse Button"),
-                  onSelected: (val) {
-                    if (val != null) {
-                      setState(() => _selectedToggleKey = val);
-                      _saveConfig();
-                    }
-                  },
-                  dropdownMenuEntries: _allToggleKeys.map((k) {
-                    return DropdownMenuEntry(
-                      value: k,
-                      label: _formatKeyDisplay(k),
-                      leadingIcon: k.contains('BTN') || ['left', 'right', 'middle'].contains(k)
-                          ? const Icon(Icons.mouse)
-                          : const Icon(Icons.keyboard),
-                    );
-                  }).toList(),
-                ),
+                _triggerField(),
               ],
               const Divider(height: 32),
 
               // --- 3. Autoclicker Speed (Interval & CPS) ---
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _sectionHeader("Click Speed (Interval)"),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(6),
+              if (_actionMode == 'hold')
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    "Interval is not used while the Action Type is 'Hold Down'.",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.outline,
+                      fontStyle: FontStyle.italic,
                     ),
-                    child: Text(
-                      "${cps.toStringAsFixed(cps >= 10 ? 0 : 1)} clicks/sec",
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              Opacity(
+                opacity: _actionMode == 'hold' ? 0.4 : 1.0,
+                child: IgnorePointer(
+                  ignoring: _actionMode == 'hold',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _sectionHeader("Click Speed (Interval)"),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              "${cps.toStringAsFixed(cps >= 10 ? 0 : 1)} clicks/sec",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: colorScheme.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Slider(
-                      value: _interval.clamp(1, maxSlider),
-                      min: 1,
-                      max: maxSlider,
-                      onChanged: (val) {
-                        setState(() {
-                          _interval = val;
-                          _intervalController.text = val.toInt().toString();
-                        });
-                        _saveConfig();
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 100,
-                    child: TextField(
-                      controller: _intervalController,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        suffixText: 'ms',
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Slider(
+                              value: _interval.clamp(1, maxSlider),
+                              min: 1,
+                              max: maxSlider,
+                              onChanged: (val) {
+                                setState(() {
+                                  _interval = val;
+                                  _intervalController.text = val.toInt().toString();
+                                });
+                                _saveConfig();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 100,
+                            child: TextField(
+                              controller: _intervalController,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                suffixText: 'ms',
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              onChanged: (text) {
+                                final parsed = int.tryParse(text);
+                                if (parsed != null && parsed > 0) {
+                                  setState(() {
+                                    _interval = parsed.toDouble();
+                                  });
+                                  _saveConfig();
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      // Quick Interval Presets
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _presetChip(10, '10ms (100 CPS)'),
+                            _presetChip(25, '25ms (40 CPS)'),
+                            _presetChip(50, '50ms (20 CPS)'),
+                            _presetChip(100, '100ms (10 CPS)'),
+                            _presetChip(250, '250ms'),
+                            _presetChip(500, '500ms'),
+                            _presetChip(1000, '1s'),
+                            _presetChip(3000, '3s'),
+                            _presetChip(5000, '5s'),
+                          ],
                         ),
                       ),
-                      onChanged: (text) {
-                        final parsed = int.tryParse(text);
-                        if (parsed != null && parsed > 0) {
-                          setState(() {
-                            _interval = parsed.toDouble();
-                          });
-                          _saveConfig();
-                        }
-                      },
-                    ),
+                    ],
                   ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              // Quick Interval Presets
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _presetChip(10, '10ms (100 CPS)'),
-                    _presetChip(25, '25ms (40 CPS)'),
-                    _presetChip(50, '50ms (20 CPS)'),
-                    _presetChip(100, '100ms (10 CPS)'),
-                    _presetChip(250, '250ms'),
-                    _presetChip(500, '500ms'),
-                    _presetChip(1000, '1s'),
-                    _presetChip(3000, '3s'),
-                    _presetChip(5000, '5s'),
-                  ],
                 ),
               ),
               const Divider(height: 32),
@@ -387,7 +506,7 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     Row(
                       children: [
-                        _sectionHeader("Target to Click"),
+                        _sectionHeader(_actionMode == 'hold' ? "Target to Hold" : "Target to Click"),
                         const SizedBox(width: 8),
                         Text(
                           _targetType == 'mouse'
@@ -453,25 +572,17 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 ] else ...[
-                  DropdownMenu<String>(
-                    expandedInsets: EdgeInsets.zero,
-                    initialSelection: _selectedTargetKey,
-                    enableSearch: true,
-                    menuHeight: 300,
-                    label: const Text("Select Target Key (e.g. G, F, Space)"),
-                    onSelected: (val) {
-                      if (val != null) {
-                        setState(() => _selectedTargetKey = val);
-                        _saveConfig();
-                      }
+                  KeyBindField(
+                    label: 'Target key or combo',
+                    value: _selectedTargetKey,
+                    presets: _allTargetKeys,
+                    allowMouse: false,
+                    helper:
+                        'Any key (G, Space, F13, ...) or combo like ctrl+c. Type it or press Record.',
+                    onChanged: (v) {
+                      setState(() => _selectedTargetKey = v);
+                      _saveConfig();
                     },
-                    dropdownMenuEntries: _allTargetKeys.map((k) {
-                      return DropdownMenuEntry(
-                        value: k,
-                        label: k,
-                        leadingIcon: const Icon(Icons.keyboard),
-                      );
-                    }).toList(),
                   ),
                 ],
               ],
@@ -482,23 +593,7 @@ class _HomePageState extends State<HomePage> {
                 width: double.infinity,
                 height: 56,
                 child: FilledButton.icon(
-                  onPressed: () async {
-                    if (_controller.isRunning) {
-                      _controller.stop();
-                    } else {
-                      _saveConfig();
-                      await _controller.start(
-                        interval: _interval.toInt(),
-                        toggleKey: _selectedToggleKey,
-                        triggerMode: _triggerMode,
-                        targetType: _targetType,
-                        button: _selectedButton,
-                        key: _selectedTargetKey,
-                        mode: _actionMode,
-                      );
-                    }
-                    setState(() {});
-                  },
+                  onPressed: _onStartStop,
                   style: FilledButton.styleFrom(
                     backgroundColor: _controller.isRunning ? Colors.redAccent : null,
                     shape: RoundedRectangleBorder(
@@ -544,13 +639,7 @@ class _HomePageState extends State<HomePage> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        _triggerMode == 'hold'
-                            ? (_controller.isRunning
-                                ? "RUNNING: Hold down ${_formatKeyDisplay(_selectedToggleKey)} with your hand to autoclick!"
-                                : "When started: HOLD DOWN ${_formatKeyDisplay(_selectedToggleKey)} to autoclick at ${_interval.toInt()}ms. Stops when released.")
-                            : (_controller.isRunning
-                                ? "RUNNING: Tap ${_formatKeyDisplay(_selectedToggleKey)} to toggle autoclicking ON/OFF."
-                                : "When started: TAP ${_formatKeyDisplay(_selectedToggleKey)} once to toggle ON, tap again to stop."),
+                        _statusText(),
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,

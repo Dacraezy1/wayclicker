@@ -1,10 +1,10 @@
 [package]
 name = "wayclicker"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 license = "GPL-3.0"
 
 [dependencies]
 clap = { version = "4.5.51", features = ["derive"] }
-ctrlc = "3.5.2"
+ctrlc = { version = "3.5.2", features = ["termination"] }
 evdev = "0.13.2"

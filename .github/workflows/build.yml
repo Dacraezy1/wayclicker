@@ -41,9 +41,12 @@ jobs:
         channel: 'stable'
         cache: true
 
-    # 4. Build Rust CLI
+    # 4. Test + build Rust CLI
+    - name: Run Rust tests
+      run: cargo test --locked --verbose
+
     - name: Build Rust Backend
-      run: cargo build --release --verbose
+      run: cargo build --release --locked --verbose
 
     # 5. Build Flutter GUI
     - name: Build Flutter Frontend
@@ -77,7 +80,10 @@ jobs:
         # Create Tarball
         tar -czvf wayclicker-linux-x64.tar.gz wayclicker-release/
 
-        # Build Debian package
+        # Build Debian package (version comes from the tag on release builds)
+        if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+          export VERSION="${GITHUB_REF_NAME#v}"
+        fi
         ./packaging/debian/build_deb.sh
 
     # 7. Upload Artifacts (For every push)

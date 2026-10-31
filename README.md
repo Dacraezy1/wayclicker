@@ -32,7 +32,7 @@ GUI Created by: **YanamiRei**
   - Emulate mouse buttons: `Left`, `Middle`, `Right`, `Side` (Back), `Extra` (Forward).
   - Emulate keyboard keys: Letters (`A`-`Z`), Numbers (`0`-`9`), Function keys (`F1`-`F12`), Navigation, `Space`, `Enter`, `Tab`, `Esc`, etc.
 - **Persistent Configuration:** Automatically saves and restores your GUI settings across boots (`~/.config/wayclicker/config.json`).
-- **Flexible Activation Keys:** Toggle with any keyboard key or mouse button (`F1`-`F12`, `A`-`Z`, `BTN_SIDE`, etc.).
+- **Fully Custom Hotkeys & Key Combos:** Bind the trigger to *any* key (`F1`-`F24`, `A`-`Z`, keypad, navigation, raw evdev names like `KEY_F20`), any mouse button, or a **combination** such as `ctrl+alt+c` or `shift+BTN_SIDE`. Type it, or press **Record** in the GUI and just press the keys. Combos can also be used as the *target* (e.g. send `ctrl+c`).
 - **System Installation & Packaging:** Install binaries to system paths (`/usr/local/bin`), desktop integration with app launcher icon, and packages for Arch, Debian/Ubuntu, and Fedora.
 
 ---
@@ -115,12 +115,12 @@ Because `Wayclicker` operates at the kernel level (`/dev/uinput` and `/dev/input
 
 Launch `wayclicker-gui` (or `./wayclicker_gui`):
 
-1. **Select Action Mode:** Choose **Click (Repeat)** or **Hold (Continuous)**.
+1. **Select Action Type:** Choose **Click Repeatedly** or **Hold Down** (keeps the target button/key pressed until you release/toggle off).
 2. **Set Interval:** Drag the slider, click a preset (e.g. `100ms`, `1s`, `5s`), or type any millisecond value directly into the text field.
 3. **Select Action Target:**
    - Choose **Mouse Button** (Left, Middle, Right, Side, Extra).
    - Or choose **Keyboard Key** (e.g. `G`, `F`, `Space`, `Enter`, `1`).
-4. **Choose Activation Toggle Key:** The key or mouse button that starts/stops clicking (e.g. `F6`, `X`, `BTN_SIDE`).
+4. **Choose the Hotkey:** The key, mouse button or combo that starts/stops (or, in *Hold* activation mode, that is held to activate) the clicker, e.g. `F6`, `F13`, `BTN_SIDE` or `ctrl+alt+c`. Type it in the box, pick one from the list, or click **Record** and press it.
 5. **Press START SERVICE:** Authenticate if prompted. Your settings are automatically saved and restored on next launch!
 
 ---
@@ -135,13 +135,15 @@ sudo wayclicker [OPTIONS]
 #### Options
 
 *   `-i, --interval <MS>`: Time in milliseconds between clicks / speed (Default: `100`).
-*   `-t, --toggle-key <KEY>`: Key or button to trigger the autoclicker (Default: `F6`). Supports `left`, `right`, `middle`, `BTN_SIDE`, `F1`-`F12`, `A`-`Z`, `SPACE`, etc.
+*   `-t, --toggle-key <KEY>`: Key, mouse button or **key combination** that triggers the autoclicker (Default: `F6`). Accepts `left`, `right`, `middle`, `side`, `extra`, `BTN_SIDE`, `F1`-`F24`, `A`-`Z`, `0`-`9`, `SPACE`, keypad keys (`kp5`, `kpenter`), any raw evdev name (`KEY_F20`, ...), and combos joined with `+` such as `ctrl+alt+c`. `ctrl`, `alt`, `shift` and `super` match either the left or right key (use `leftctrl`, `rightalt`, ... to be specific).
 *   `--trigger-mode <MODE>`: Activation mode: `hold` (autoclick while held) or `toggle` (click to toggle on/off). Default: `toggle`.
 *   `--hold-to-click`: Shorthand flag for `--trigger-mode hold` (autoclicks continuously only while holding down the button/key, stops immediately when released).
 *   `-b, --button <BTN>`: Target mouse button (`left`, `right`, `middle`, `side`, `extra`).
-*   `-k, --key <KEY>`: Target keyboard key (e.g. `G`, `F`, `Space`, `Enter`, `1`, `W`).
+*   `-k, --key <KEY>`: Target keyboard key or combo (e.g. `G`, `F`, `Space`, `Enter`, `1`, `W`, `F13`, `ctrl+c`).
 *   `--target <TARGET>`: Target button or key name.
 *   `-m, --mode <MODE>`: Action mode: `click` (rapid pulse clicks) or `hold` (virtual button held down).
+*   `--hold`: Shorthand for `--mode hold`.
+*   `--validate`: Only check that the given keys/combos are valid and exit (no root needed).
 
 #### Examples
 
@@ -184,6 +186,28 @@ sudo wayclicker --key G --interval 2500 --toggle-key F7
 ```bash
 sudo wayclicker --key F --hold --toggle-key F8
 ```
+
+**9. Use F13 as the toggle key (or any key your keyboard/macro pad sends, e.g. F21):**
+```bash
+sudo wayclicker --toggle-key F13 --interval 100
+```
+
+**10. Use a key combination as the hotkey (Ctrl + Alt + C toggles clicking):**
+```bash
+sudo wayclicker --toggle-key "ctrl+alt+c" --interval 50
+```
+
+**11. Hold the left mouse button down while the hotkey is held (drag / charge attacks):**
+```bash
+sudo wayclicker --toggle-key F9 --hold-to-click --button left --mode hold
+```
+
+**12. Press a key combination repeatedly (Ctrl+S every 30 seconds):**
+```bash
+sudo wayclicker --toggle-key F10 --key "ctrl+s" --interval 30000
+```
+
+> **Note:** Wayclicker only *listens* to your keyboard, it does not grab it. A hotkey such as `ctrl+alt+c` is therefore still delivered to the focused application too, so pick a combination that does nothing there (or use a dedicated key like `F13`).
 
 ---
 

@@ -50,6 +50,39 @@ class ClickerController {
     throw Exception("Binary 'wayclicker' not found side-by-side, in /usr/local/bin, or in PATH.");
   }
 
+  /// Asks the CLI (without any special permissions) whether the configured
+  /// keys are valid. Returns null when everything is fine, otherwise a
+  /// human-readable error message (which is also written to the log).
+  Future<String?> validate({
+    required String toggleKey,
+    required String targetType,
+    required String button,
+    required String key,
+  }) async {
+    try {
+      final String path = await _findBinaryPath();
+      final List<String> args = [
+        '--validate',
+        '--toggle-key', toggleKey,
+        if (targetType == 'keyboard') ...['--key', key] else ...['--button', button],
+      ];
+      final result = await Process.run(path, args);
+      if (result.exitCode == 0) return null;
+
+      String message = result.stderr.toString().trim();
+      if (message.startsWith('Error:')) {
+        message = message.substring(6).trim();
+      }
+      if (message.isEmpty) message = 'Invalid key configuration.';
+      _logBuffer = "[X] $message\n";
+      _logController.add(_logBuffer);
+      return message;
+    } catch (e) {
+      // If validation itself cannot run, let start() report the real problem.
+      return null;
+    }
+  }
+
   Future<void> start({
     required int interval,
     required String toggleKey,
