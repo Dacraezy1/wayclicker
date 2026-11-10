@@ -5,9 +5,9 @@ A simple autoclicker for Linux. It clicks or holds a mouse button or key when yo
 Works on **Wayland and X11**: GNOME, KDE Plasma, Hyprland, Sway, XFCE, Cinnamon and others. It uses the kernel's `uinput`, so it needs no compositor support.
 
 <p align="center">
-  <img width="45%" src="https://github.com/user-attachments/assets/56264b44-1bda-4210-826c-318647ae5fe9" />
+  <img width="45%" src="screenshot-2026-11-10_19-43-41.png" />
   &nbsp;&nbsp;
-  <img width="45%" src="https://github.com/user-attachments/assets/2144643c-e7ae-449b-8088-419d82c45569" />
+  <img width="45%" src="screenshot-2026-11-10_19-45-23.png" />
 </p>
 
 ## Install
