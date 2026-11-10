@@ -1,0 +1,8 @@
+post_install() {
+  modprobe uinput 2>/dev/null || true
+  udevadm control --reload-rules 2>/dev/null || true
+  udevadm trigger --subsystem-match=misc --action=add 2>/dev/null || true
+  echo "To use Wayclicker without a password prompt: sudo usermod -aG input \$USER (then log out and in)"
+}
+post_upgrade() { post_install; }
+post_remove() { udevadm control --reload-rules 2>/dev/null || true; }

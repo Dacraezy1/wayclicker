@@ -1,9 +1,38 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:wayclicker_gui/config/config_storage.dart';
+import 'package:flutter/services.dart';
+import 'package:wayclicker_gui/config/settings.dart';
 import 'package:wayclicker_gui/runner/wayclick_runner.dart';
 import 'package:wayclicker_gui/widgets/key_bind_field.dart';
+
+/// Hotkeys offered in the drop-down. Anything else can be typed or recorded.
+final List<String> _hotkeyPresets = [
+  ...List<String>.generate(24, (i) => 'F${i + 1}'),
+  'left',
+  'right',
+  'middle',
+  'BTN_SIDE',
+  'BTN_EXTRA',
+  'ctrl+alt+c',
+];
+
+/// Keys offered for "Keyboard key".
+final List<String> _keyPresets = [
+  ...List<String>.generate(26, (i) => String.fromCharCode(65 + i)),
+  ...List<String>.generate(10, (i) => '$i'),
+  'SPACE',
+  'ENTER',
+  'TAB',
+  'ESC',
+  'BACKSPACE',
+  'arrowup',
+  'arrowdown',
+  'arrowleft',
+  'arrowright',
+];
+
+const List<int> _intervalPresets = [10, 50, 100, 250, 500, 1000];
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -14,765 +43,529 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final ClickerController _controller = ClickerController();
-  late TextEditingController _intervalController;
+  final TextEditingController _intervalText = TextEditingController();
+  StreamSubscription<void>? _sub;
 
-  final List<String> _allToggleKeys = [
-    'left',
-    'right',
-    'middle',
-    'BTN_SIDE',
-    'BTN_EXTRA',
-    // Function Keys (F1-F24)
-    ...List.generate(24, (i) => 'F${i + 1}'),
-    // Number Keys
-    ...List.generate(10, (i) => '$i'),
-    // Alpha Keys
-    ...List.generate(26, (i) => String.fromCharCode(65 + i)),
-    // Modifiers & Special
-    'SPACE',
-    'ENTER',
-    'TAB',
-    'ESC',
-    'SHIFT',
-    'CTRL',
-    'ALT',
-    'SUPER',
-    'CAPSLOCK',
-    'INSERT',
-    'DELETE',
-    'HOME',
-    'END',
-    'PAGEUP',
-    'PAGEDOWN',
-    // Handy combo examples
-    'ctrl+alt+c',
-    'ctrl+shift+x',
-  ];
-
-  final List<String> _allTargetKeys = [
-    ...List.generate(26, (i) => String.fromCharCode(65 + i)),
-    ...List.generate(10, (i) => '$i'),
-    ...List.generate(24, (i) => 'F${i + 1}'),
-    'SPACE',
-    'ENTER',
-    'TAB',
-    'ESC',
-    'BACKSPACE',
-    'SHIFT',
-    'CTRL',
-    'ALT',
-    'UP',
-    'DOWN',
-    'arrowleft',
-    'arrowright',
-    'INSERT',
-    'DELETE',
-    'HOME',
-    'END',
-    'PAGEUP',
-    'PAGEDOWN',
-  ];
-
-  // Config state
-  double _interval = 50;
-  String _triggerMode = 'hold'; // 'hold' (autoclick while held) or 'toggle' (click to toggle on/off)
-  String _selectedToggleKey = 'left';
-  String _targetType = 'mouse'; // 'mouse' or 'keyboard'
-  String _selectedButton = 'left';
-  String _selectedTargetKey = 'G';
-  String _actionMode = 'click'; // 'click' (pulse clicks) or 'hold' (continuous virtual hold)
-
-  bool _isConfigLoaded = false;
-  bool _showAdvancedOptions = false;
-  StreamSubscription<String>? _logSub;
+  Settings _s = Settings();
+  bool _loaded = false;
+  String? _intervalError;
 
   @override
   void initState() {
     super.initState();
-    _intervalController = TextEditingController(text: _interval.toInt().toString());
-    // Refresh the Start/Stop button when the service exits on its own.
-    _logSub = _controller.logStream.listen((_) {
+    _sub = _controller.changes.listen((_) {
       if (mounted) setState(() {});
     });
-    _loadConfig();
+    _init();
   }
 
-  Future<void> _loadConfig() async {
-    final config = await WayclickConfig.load();
+  Future<void> _init() async {
+    final loaded = await Settings.load();
     if (!mounted) return;
     setState(() {
-      _interval = config.interval.toDouble();
-      _triggerMode = (config.triggerMode == 'toggle') ? 'toggle' : 'hold';
-      _selectedToggleKey = config.toggleKey.trim().isEmpty ? 'left' : config.toggleKey.trim();
-      _targetType = (config.targetType == 'keyboard') ? 'keyboard' : 'mouse';
-      _selectedButton = config.button;
-      _selectedTargetKey = config.key.trim().isEmpty ? 'G' : config.key.trim();
-      _actionMode = (config.mode == 'hold') ? 'hold' : 'click';
-      _showAdvancedOptions = _targetType == 'keyboard';
-      _intervalController.text = _interval.toInt().toString();
-      _isConfigLoaded = true;
+      _s = loaded;
+      _intervalText.text = loaded.interval.toString();
+      _loaded = true;
     });
-  }
-
-  void _saveConfig() {
-    final config = WayclickConfig(
-      interval: _interval.toInt(),
-      toggleKey: _selectedToggleKey,
-      triggerMode: _triggerMode,
-      targetType: _targetType,
-      button: _selectedButton,
-      key: _selectedTargetKey,
-      mode: _actionMode,
-    );
-    config.save();
+    await _controller.prepare();
   }
 
   @override
   void dispose() {
-    _logSub?.cancel();
-    _intervalController.dispose();
-    _controller.dispose();
+    _sub?.cancel();
+    _intervalText.dispose();
+    unawaited(_controller.dispose());
     super.dispose();
   }
 
-  void _setInterval(double val) {
-    setState(() {
-      _interval = val.clamp(1, 999999);
-      _intervalController.text = _interval.toInt().toString();
+  /// Applies a change and saves it.
+  void _change(VoidCallback apply) {
+    setState(apply);
+    unawaited(_s.save());
+  }
+
+  void _onIntervalChanged(String text) {
+    final value = int.tryParse(text.trim());
+    if (value == null || value < minInterval) {
+      setState(() => _intervalError = 'Enter a number, 1 or more');
+    } else if (value > maxInterval) {
+      setState(() => _intervalError = 'Maximum is $maxInterval ms');
+    } else {
+      _change(() {
+        _intervalError = null;
+        _s.interval = value;
+      });
+    }
+  }
+
+  void _setInterval(int value) {
+    _intervalText.text = '$value';
+    _change(() {
+      _intervalError = null;
+      _s.interval = value;
     });
-    _saveConfig();
-  }
-
-  String _formatKeyDisplay(String key) {
-    switch (key.toLowerCase()) {
-      case 'left':
-      case 'btn_left':
-        return 'Left Click';
-      case 'right':
-      case 'btn_right':
-        return 'Right Click';
-      case 'middle':
-      case 'btn_middle':
-        return 'Middle Click';
-      case 'btn_side':
-        return 'Mouse Side (Back)';
-      case 'btn_extra':
-        return 'Mouse Extra (Forward)';
-      default:
-        return key;
-    }
-  }
-
-  Widget _triggerField() {
-    return KeyBindField(
-      label: _triggerMode == 'hold'
-          ? 'Hold-to-activate key / button / combo'
-          : 'Toggle key / button / combo',
-      value: _selectedToggleKey,
-      presets: _allToggleKeys,
-      presetLabel: _formatKeyDisplay,
-      helper:
-          'Any key (F1-F24, ...), mouse button, or combo like ctrl+alt+c. Type it or press Record.',
-      onChanged: (v) {
-        setState(() => _selectedToggleKey = v);
-        _saveConfig();
-      },
-    );
-  }
-
-  String get _targetLabel =>
-      _targetType == 'mouse' ? _formatKeyDisplay(_selectedButton) : _selectedTargetKey;
-
-  String _statusText() {
-    final String trigger = _formatKeyDisplay(_selectedToggleKey);
-    final String target = _targetLabel;
-    final bool running = _controller.isRunning;
-    if (_triggerMode == 'hold') {
-      if (_actionMode == 'hold') {
-        return running
-            ? "RUNNING: Hold down $trigger to keep $target held down!"
-            : "When started: HOLD DOWN $trigger to keep $target held down. Released when you let go.";
-      }
-      return running
-          ? "RUNNING: Hold down $trigger with your hand to autoclick!"
-          : "When started: HOLD DOWN $trigger to autoclick at ${_interval.toInt()}ms. Stops when released.";
-    }
-    if (_actionMode == 'hold') {
-      return running
-          ? "RUNNING: Tap $trigger to hold $target down, tap again to release."
-          : "When started: TAP $trigger once to hold $target down, tap again to release.";
-    }
-    return running
-        ? "RUNNING: Tap $trigger to toggle autoclicking ON/OFF."
-        : "When started: TAP $trigger once to toggle ON, tap again to stop.";
   }
 
   Future<void> _onStartStop() async {
     if (_controller.isRunning) {
-      _controller.stop();
-      setState(() {});
+      await _controller.stop();
       return;
     }
+    if (_controller.isActive) return;
+    if (!_s.isHoldAction && _intervalError != null) return;
 
-    _saveConfig();
-    final String? error = await _controller.validate(
-      toggleKey: _selectedToggleKey,
-      targetType: _targetType,
-      button: _selectedButton,
-      key: _selectedTargetKey,
-    );
-    if (error != null) {
+    await _s.save();
+    final problem = await _controller.validate(_s);
+    if (problem != null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), duration: const Duration(seconds: 5)),
+        SnackBar(
+          content: Text(problem),
+          duration: const Duration(seconds: 5),
+        ),
       );
-      setState(() {});
       return;
     }
-
-    await _controller.start(
-      interval: _interval.toInt(),
-      toggleKey: _selectedToggleKey,
-      triggerMode: _triggerMode,
-      targetType: _targetType,
-      button: _selectedButton,
-      key: _selectedTargetKey,
-      mode: _actionMode,
-    );
-    if (mounted) setState(() {});
+    await _controller.start(_s);
   }
+
+  // ---------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    if (!_isConfigLoaded) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+    if (!_loaded) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-
-    final double maxSlider = (_interval > 5000) ? _interval : 5000;
-    final double cps = (_interval > 0) ? (1000.0 / _interval) : 0;
+    final scheme = Theme.of(context).colorScheme;
+    final active = _controller.isActive;
 
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(colorScheme),
-              const SizedBox(height: 20),
-
-              // --- 1. Activation Mode Selection (Hold to Click vs Toggle) ---
-              _sectionHeader("Activation Mode"),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 'hold',
-                      label: Text('Hold to Click (While Held)'),
-                      icon: Icon(Icons.touch_app),
-                    ),
-                    ButtonSegment(
-                      value: 'toggle',
-                      label: Text('Toggle (Tap On / Off)'),
-                      icon: Icon(Icons.toggle_on),
-                    ),
-                  ],
-                  selected: {_triggerMode},
-                  onSelectionChanged: (val) {
-                    setState(() => _triggerMode = val.first);
-                    _saveConfig();
-                  },
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _triggerMode == 'hold'
-                    ? "✨ Autoclicks continuously only while holding down the button or key. Stops as soon as you let go."
-                    : "✨ Tap your hotkey once to start clicking continuously, tap again to stop.",
-                style: TextStyle(
-                  fontSize: 12,
-                  color: colorScheme.outline,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // --- 1b. Action Type (click repeatedly vs hold down) ---
-              _sectionHeader("Action Type"),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 'click',
-                      label: Text('Click Repeatedly'),
-                      icon: Icon(Icons.repeat),
-                    ),
-                    ButtonSegment(
-                      value: 'hold',
-                      label: Text('Hold Down'),
-                      icon: Icon(Icons.pan_tool),
-                    ),
-                  ],
-                  selected: {_actionMode},
-                  onSelectionChanged: (val) {
-                    setState(() => _actionMode = val.first);
-                    _saveConfig();
-                  },
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _actionMode == 'hold'
-                    ? "✨ Presses the target button/key and keeps it held down (no repeated clicking) until you release / toggle off."
-                    : "✨ Presses and releases the target button/key over and over at the chosen interval.",
-                style: TextStyle(
-                  fontSize: 12,
-                  color: colorScheme.outline,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // --- 2. Button / Key Trigger Selection ---
-              _sectionHeader(
-                _triggerMode == 'hold'
-                    ? "Hold Which Button to Autoclick?"
-                    : "Activation Hotkey / Button",
-              ),
-              const SizedBox(height: 8),
-              if (_triggerMode == 'hold') ...[
-                // Quick preset for Left, Right, Middle, or Other
-                SizedBox(
-                  width: double.infinity,
-                  child: SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'left', label: Text('Left Click')),
-                      ButtonSegment(value: 'right', label: Text('Right Click')),
-                      ButtonSegment(value: 'middle', label: Text('Middle Click')),
-                      ButtonSegment(value: 'custom', label: Text('Other Key')),
-                    ],
-                    selected: {
-                      ['left', 'right', 'middle'].contains(_selectedToggleKey)
-                          ? _selectedToggleKey
-                          : 'custom'
-                    },
-                    onSelectionChanged: (val) {
-                      final selected = val.first;
-                      setState(() {
-                        if (selected == 'custom') {
-                          _selectedToggleKey = 'F6';
-                        } else {
-                          _selectedToggleKey = selected;
-                          // In hold-click mode, automatically align target button to trigger button
-                          _selectedButton = selected;
-                          _targetType = 'mouse';
-                        }
-                      });
-                      _saveConfig();
-                    },
-                  ),
-                ),
-                if (!['left', 'right', 'middle'].contains(_selectedToggleKey)) ...[
-                  const SizedBox(height: 12),
-                  _triggerField(),
-                ],
-              ] else ...[
-                _triggerField(),
-              ],
-              const Divider(height: 32),
-
-              // --- 3. Autoclicker Speed (Interval & CPS) ---
-              if (_actionMode == 'hold')
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    "Interval is not used while the Action Type is 'Hold Down'.",
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.outline,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                ),
-              Opacity(
-                opacity: _actionMode == 'hold' ? 0.4 : 1.0,
-                child: IgnorePointer(
-                  ignoring: _actionMode == 'hold',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _sectionHeader("Click Speed (Interval)"),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: colorScheme.primaryContainer,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              "${cps.toStringAsFixed(cps >= 10 ? 0 : 1)} clicks/sec",
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: colorScheme.onPrimaryContainer,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Slider(
-                              value: _interval.clamp(1, maxSlider),
-                              min: 1,
-                              max: maxSlider,
-                              onChanged: (val) {
-                                setState(() {
-                                  _interval = val;
-                                  _intervalController.text = val.toInt().toString();
-                                });
-                                _saveConfig();
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _intervalController,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                suffixText: 'ms',
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                              onChanged: (text) {
-                                final parsed = int.tryParse(text);
-                                if (parsed != null && parsed > 0) {
-                                  setState(() {
-                                    _interval = parsed.toDouble();
-                                  });
-                                  _saveConfig();
-                                }
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      // Quick Interval Presets
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: [
-                            _presetChip(10, '10ms (100 CPS)'),
-                            _presetChip(25, '25ms (40 CPS)'),
-                            _presetChip(50, '50ms (20 CPS)'),
-                            _presetChip(100, '100ms (10 CPS)'),
-                            _presetChip(250, '250ms'),
-                            _presetChip(500, '500ms'),
-                            _presetChip(1000, '1s'),
-                            _presetChip(3000, '3s'),
-                            _presetChip(5000, '5s'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Divider(height: 32),
-
-              // --- 4. Target Action (Button or Key) ---
-              InkWell(
-                onTap: () => setState(() => _showAdvancedOptions = !_showAdvancedOptions),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              children: [
+                _header(scheme),
+                const SizedBox(height: 16),
+                // Settings are locked while running, so what you see is what runs.
+                AbsorbPointer(
+                  absorbing: active,
+                  child: Opacity(
+                    opacity: active ? 0.5 : 1,
+                    child: Column(
                       children: [
-                        _sectionHeader(_actionMode == 'hold' ? "Target to Hold" : "Target to Click"),
-                        const SizedBox(width: 8),
-                        Text(
-                          _targetType == 'mouse'
-                              ? "(${_formatKeyDisplay(_selectedButton)})"
-                              : "(Key: $_selectedTargetKey)",
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: colorScheme.secondary,
-                          ),
-                        ),
+                        _hotkeySection(),
+                        const SizedBox(height: 12),
+                        _targetSection(),
+                        const SizedBox(height: 12),
+                        _actionSection(),
                       ],
                     ),
-                    Icon(
-                      _showAdvancedOptions ? Icons.expand_less : Icons.expand_more,
-                      size: 20,
-                      color: colorScheme.primary,
-                    ),
-                  ],
-                ),
-              ),
-              if (_showAdvancedOptions) ...[
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(
-                        value: 'mouse',
-                        label: Text('Mouse Button'),
-                        icon: Icon(Icons.mouse),
-                      ),
-                      ButtonSegment(
-                        value: 'keyboard',
-                        label: Text('Keyboard Key'),
-                        icon: Icon(Icons.keyboard),
-                      ),
-                    ],
-                    selected: {_targetType},
-                    onSelectionChanged: (val) {
-                      setState(() => _targetType = val.first);
-                      _saveConfig();
-                    },
                   ),
                 ),
+                const SizedBox(height: 20),
+                _startButton(scheme),
                 const SizedBox(height: 12),
-                if (_targetType == 'mouse') ...[
-                  SizedBox(
-                    width: double.infinity,
-                    child: SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment(value: 'left', label: Text('Left')),
-                        ButtonSegment(value: 'middle', label: Text('Middle')),
-                        ButtonSegment(value: 'right', label: Text('Right')),
-                        ButtonSegment(value: 'side', label: Text('Side')),
-                        ButtonSegment(value: 'extra', label: Text('Extra')),
-                      ],
-                      selected: {_selectedButton},
-                      onSelectionChanged: (val) {
-                        setState(() => _selectedButton = val.first);
-                        _saveConfig();
-                      },
-                    ),
-                  ),
-                ] else ...[
-                  KeyBindField(
-                    label: 'Target key or combo',
-                    value: _selectedTargetKey,
-                    presets: _allTargetKeys,
-                    allowMouse: false,
-                    helper:
-                        'Any key (G, Space, F13, ...) or combo like ctrl+c. Type it or press Record.',
-                    onChanged: (v) {
-                      setState(() => _selectedTargetKey = v);
-                      _saveConfig();
-                    },
-                  ),
+                _infoBox(scheme),
+                if (_controller.error != null) ...[
+                  const SizedBox(height: 12),
+                  _errorBox(scheme),
                 ],
+                const SizedBox(height: 8),
+                _logTile(scheme),
               ],
-              const SizedBox(height: 28),
-
-              // --- 5. Start/Stop Action Button ---
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: FilledButton.icon(
-                  onPressed: _onStartStop,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _controller.isRunning ? Colors.redAccent : null,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  icon: Icon(
-                    _controller.isRunning
-                        ? Icons.power_settings_new
-                        : Icons.play_arrow,
-                  ),
-                  label: Text(
-                    _controller.isRunning ? "STOP SERVICE" : "START SERVICE",
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // Active instructions badge
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: _controller.isRunning
-                      ? Colors.green.withAlpha(isDark ? 50 : 30)
-                      : colorScheme.surfaceContainerHighest.withAlpha(120),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: _controller.isRunning ? Colors.green : Colors.transparent,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      _controller.isRunning ? Icons.check_circle : Icons.info_outline,
-                      size: 20,
-                      color: _controller.isRunning ? Colors.green : colorScheme.primary,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        _statusText(),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: _controller.isRunning
-                              ? (isDark ? Colors.lightGreenAccent : Colors.green.shade800)
-                              : colorScheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // --- 6. Live Console Output ---
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _sectionHeader("Live Console Output"),
-                  Text(
-                    "Config auto-saved",
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: colorScheme.outline,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                height: 130,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.black.withAlpha(120)
-                      : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isDark ? Colors.white12 : Colors.black12,
-                  ),
-                ),
-                child: StreamBuilder<String>(
-                  stream: _controller.logStream,
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return Text(
-                        "Error: ${snapshot.error}",
-                        style: const TextStyle(color: Colors.red),
-                      );
-                    }
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                      return const Text(
-                        "Ready to start. Press START SERVICE to initialize kernel uinput.",
-                        style: TextStyle(color: Colors.grey, fontSize: 12),
-                      );
-                    }
-
-                    return SingleChildScrollView(
-                      reverse: true,
-                      child: Text(
-                        snapshot.data!,
-                        style: TextStyle(
-                          color: colorScheme.primary,
-                          fontFamily: 'monospace',
-                          fontSize: 12,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _presetChip(int value, String label) {
-    final isSelected = _interval.toInt() == value;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6.0),
-      child: FilterChip(
-        selected: isSelected,
-        label: Text(label),
-        labelStyle: TextStyle(
-          fontSize: 11,
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-        ),
-        onSelected: (_) => _setInterval(value.toDouble()),
-      ),
-    );
-  }
-
-  Widget _buildHeader(ColorScheme colorScheme) {
+  Widget _header(ColorScheme scheme) {
+    final (String label, Color color) = switch (_controller.state) {
+      RunState.stopped => ('Stopped', scheme.outline),
+      RunState.starting => ('Starting', Colors.orange),
+      RunState.running => ('Running', Colors.green),
+    };
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'WAYCLICKER',
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-                color: colorScheme.primary,
-                letterSpacing: 1.5,
-              ),
+        Expanded(
+          child: Text(
+            'Wayclicker',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
             ),
-            Text(
-              'Universal Linux Autoclicker (Wayland & X11)',
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.secondary,
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.circle, size: 10, color: color),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(color: color, fontWeight: FontWeight.w600),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );
   }
 
-  Widget _sectionHeader(String title) {
-    return Text(
-      title.toUpperCase(),
-      style: TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.bold,
-        color: Theme.of(context).colorScheme.primary,
-        letterSpacing: 1.1,
+  Widget _section(String title, List<Widget> children) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      color: scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: scheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...children,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _hotkeySection() {
+    return _section('1. Hotkey', [
+      KeyBindField(
+        label: 'Hotkey',
+        value: _s.hotkey,
+        presets: _hotkeyPresets,
+        presetLabel: prettyKey,
+        helper: 'A key, mouse button or combo such as ctrl+alt+c.',
+        onChanged: (v) => _change(() => _s.hotkey = v),
+      ),
+      const SizedBox(height: 12),
+      SizedBox(
+        width: double.infinity,
+        child: SegmentedButton<String>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(
+              value: 'toggle',
+              label: Text('Press to start / stop'),
+              icon: Icon(Icons.toggle_on_outlined),
+            ),
+            ButtonSegment(
+              value: 'hold',
+              label: Text('Hold to run'),
+              icon: Icon(Icons.touch_app_outlined),
+            ),
+          ],
+          selected: {_s.triggerMode},
+          onSelectionChanged: (v) => _change(() => _s.triggerMode = v.first),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _targetSection() {
+    const labels = {
+      'left': 'Left',
+      'middle': 'Middle',
+      'right': 'Right',
+      'side': 'Side',
+      'extra': 'Extra',
+    };
+    return _section('2. What to press', [
+      SizedBox(
+        width: double.infinity,
+        child: SegmentedButton<String>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(
+              value: 'mouse',
+              label: Text('Mouse button'),
+              icon: Icon(Icons.mouse_outlined),
+            ),
+            ButtonSegment(
+              value: 'keyboard',
+              label: Text('Keyboard key'),
+              icon: Icon(Icons.keyboard_outlined),
+            ),
+          ],
+          selected: {_s.targetType},
+          onSelectionChanged: (v) => _change(() => _s.targetType = v.first),
+        ),
+      ),
+      const SizedBox(height: 12),
+      if (_s.targetsMouse)
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final b in mouseButtons)
+              ChoiceChip(
+                label: Text(labels[b] ?? b),
+                selected: _s.button == b,
+                onSelected: (_) => _change(() => _s.button = b),
+              ),
+          ],
+        )
+      else
+        KeyBindField(
+          label: 'Key',
+          value: _s.key,
+          presets: _keyPresets,
+          allowMouse: false,
+          helper: 'Any key, or a combo such as ctrl+c.',
+          onChanged: (v) => _change(() => _s.key = v),
+        ),
+    ]);
+  }
+
+  String _rate(int ms) {
+    final perSecond = 1000 / ms;
+    if (perSecond >= 10) return '${perSecond.round()} clicks / second';
+    if (perSecond >= 1) return '${perSecond.toStringAsFixed(1)} clicks / second';
+    final seconds = ms / 1000;
+    return '1 click every ${seconds.toStringAsFixed(ms % 1000 == 0 ? 0 : 1)} s';
+  }
+
+  Widget _actionSection() {
+    final scheme = Theme.of(context).colorScheme;
+    return _section('3. How', [
+      SizedBox(
+        width: double.infinity,
+        child: SegmentedButton<String>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(
+              value: 'click',
+              label: Text('Click repeatedly'),
+              icon: Icon(Icons.repeat),
+            ),
+            ButtonSegment(
+              value: 'hold',
+              label: Text('Hold down'),
+              icon: Icon(Icons.pan_tool_outlined),
+            ),
+          ],
+          selected: {_s.mode},
+          onSelectionChanged: (v) => _change(() => _s.mode = v.first),
+        ),
+      ),
+      const SizedBox(height: 12),
+      if (_s.isHoldAction)
+        Text(
+          'The button or key stays pressed while the hotkey is active.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        )
+      else ...[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 150,
+              child: TextField(
+                controller: _intervalText,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: InputDecoration(
+                  labelText: 'Interval',
+                  suffixText: 'ms',
+                  isDense: true,
+                  errorText: _intervalError,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onChanged: _onIntervalChanged,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  _intervalError == null ? _rate(_s.interval) : '',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final ms in _intervalPresets)
+              ChoiceChip(
+                label: Text(ms >= 1000 ? '${ms ~/ 1000} s' : '$ms ms'),
+                selected: _s.interval == ms,
+                onSelected: (_) => _setInterval(ms),
+              ),
+          ],
+        ),
+      ],
+    ]);
+  }
+
+  Widget _startButton(ColorScheme scheme) {
+    final state = _controller.state;
+    final bool running = state == RunState.running;
+    final String label = switch (state) {
+      RunState.stopped => 'Start',
+      RunState.starting => 'Starting...',
+      RunState.running => 'Stop',
+    };
+    final bool blocked =
+        state == RunState.stopped && !_s.isHoldAction && _intervalError != null;
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: FilledButton.icon(
+        onPressed: (state == RunState.starting || blocked) ? null : _onStartStop,
+        style: FilledButton.styleFrom(
+          backgroundColor: running ? scheme.error : null,
+          foregroundColor: running ? scheme.onError : null,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        icon: Icon(running ? Icons.stop_rounded : Icons.play_arrow_rounded),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
+
+  Widget _infoBox(ColorScheme scheme) {
+    final state = _controller.state;
+    final running = state == RunState.running;
+    final lines = <String>[
+      switch (state) {
+        RunState.stopped => _s.describe(),
+        RunState.starting => 'Starting. Approve the password prompt if one appears.',
+        RunState.running => 'Running. ${_s.describe()}',
+      },
+      if (state == RunState.stopped && _controller.needsPassword == true)
+        'You will be asked for your password when you press Start. '
+            'To skip that, see "Permissions" in the README.',
+    ];
+    final Color accent = running ? Colors.green : scheme.primary;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: running
+            ? Colors.green.withValues(alpha: 0.12)
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            running ? Icons.check_circle_outline : Icons.info_outline,
+            size: 20,
+            color: accent,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(lines.first, style: Theme.of(context).textTheme.bodyMedium),
+                for (final extra in lines.skip(1)) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    extra,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _errorBox(ColorScheme scheme) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, size: 20, color: scheme.onErrorContainer),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _controller.error ?? '',
+              style: TextStyle(color: scheme.onErrorContainer),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _logTile(ColorScheme scheme) {
+    final log = _controller.log;
+    return ExpansionTile(
+      title: const Text('Log'),
+      tilePadding: EdgeInsets.zero,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      children: [
+        Container(
+          width: double.infinity,
+          height: 140,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: SingleChildScrollView(
+            reverse: true,
+            child: SelectableText(
+              log.isEmpty ? 'Nothing yet.' : log.join('\n'),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

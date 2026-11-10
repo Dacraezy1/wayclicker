@@ -1,45 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Builds everything locally: the CLI, the GUI and the portable tarball.
+# Needs: Rust (cargo) and the Flutter SDK. Output: wayclicker-linux-x64.tar.gz
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-set -e
+echo "==> Building the command-line program"
+cargo build --release --locked
 
-# Define paths
-ROOT_DIR=$(pwd)
-OUTPUT_DIR="$ROOT_DIR/output"
-FLUTTER_BUNDLE="$ROOT_DIR/gui/build/linux/x64/release/bundle"
+echo "==> Building the GUI"
+(cd gui && flutter pub get && flutter build linux --release)
 
-echo "Starting Build Process..."
-
-# Build the CLI binary
-echo "Building CLI Binary..."
-cargo build --release
-
-# Build the Flutter GUI
-echo "Building Flutter GUI..."
-cd gui
-flutter pub get
-flutter build linux --release
-cd ..
-
-# Prepare Output Directory
-echo "Organizing files..."
-# Remove old output if it exists and recreate it
-rm -rf "$OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR"
-
-# Copy the Flutter bundle
-cp -r "$FLUTTER_BUNDLE/." "$OUTPUT_DIR/"
-
-# Copy the CLI Binary into the output folder
-cp "$ROOT_DIR/target/release/wayclicker" "$OUTPUT_DIR/"
-
-# Copy installation scripts, desktop integration, and assets
-cp "$ROOT_DIR/install.sh" "$OUTPUT_DIR/"
-cp "$ROOT_DIR/uninstall.sh" "$OUTPUT_DIR/"
-cp "$ROOT_DIR/wayclicker.desktop" "$OUTPUT_DIR/"
-mkdir -p "$OUTPUT_DIR/assets"
-cp -r "$ROOT_DIR/assets/." "$OUTPUT_DIR/assets/"
-mkdir -p "$OUTPUT_DIR/packaging"
-cp -r "$ROOT_DIR/packaging/." "$OUTPUT_DIR/packaging/"
-
-echo "Done!"
-echo "Output Directory: $OUTPUT_DIR"
+echo "==> Creating the tarball"
+./packaging/make_tarball.sh
+echo "Done. Install with:  tar xzf wayclicker-linux-x64.tar.gz && cd wayclicker-release && sudo ./install.sh"

@@ -1,41 +1,34 @@
-import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:wayclicker_gui/pages/home.dart';
 
 void main() {
-  runApp(const WayClicker());
+  runApp(const WayclickerApp());
 }
 
-class WayClicker extends StatelessWidget {
-  const WayClicker({super.key});
+class WayclickerApp extends StatelessWidget {
+  const WayclickerApp({super.key});
 
-  static final _defaultLightColorScheme = ColorScheme.fromSwatch(
-    primarySwatch: Colors.deepPurple,
-  );
+  static const Color _seed = Color(0xFF5B5BD6);
 
-  static final _defaultDarkColorScheme = ColorScheme.fromSwatch(
-    primarySwatch: Colors.deepPurple,
-    brightness: Brightness.dark,
-  );
+  ThemeData _theme(Brightness brightness) {
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: _seed,
+        brightness: brightness,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return DynamicColorBuilder(
-      builder: (lightColorScheme, darkColorScheme) {
-        return MaterialApp(
-          title: 'WayClicker GUI',
-          theme: ThemeData(
-            colorScheme: lightColorScheme ?? _defaultLightColorScheme,
-            useMaterial3: true,
-          ),
-          darkTheme: ThemeData(
-            colorScheme: darkColorScheme ?? _defaultDarkColorScheme,
-            useMaterial3: true,
-          ),
-          themeMode: ThemeMode.system,
-          home: HomePage(),
-        );
-      },
+    return MaterialApp(
+      title: 'Wayclicker',
+      debugShowCheckedModeBanner: false,
+      theme: _theme(Brightness.light),
+      darkTheme: _theme(Brightness.dark),
+      themeMode: ThemeMode.system,
+      home: const HomePage(),
     );
   }
 }

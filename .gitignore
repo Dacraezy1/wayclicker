@@ -8,3 +8,9 @@ packaging/arch/src/
 packaging/arch/pkg/
 packaging/arch-bin/src/
 packaging/arch-bin/pkg/
+/wayclicker-release/
+/Wayclicker.AppDir/
+/.rpmbuild/
+*.rpm
+*.AppImage
+/result

@@ -1,10 +1,20 @@
 [package]
 name = "wayclicker"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Universal autoclicker for Linux (Wayland & X11) using kernel uinput"
 license = "GPL-3.0"
+repository = "https://github.com/Dacraezy1/wayclicker"
+readme = "README.md"
 
 [dependencies]
 clap = { version = "4.5.51", features = ["derive"] }
 ctrlc = { version = "3.5.2", features = ["termination"] }
 evdev = "0.13.2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

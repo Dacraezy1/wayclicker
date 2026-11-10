@@ -1,0 +1,4 @@
+# Lets members of the "input" group (and the user at the active seat) use the
+# uinput device that Wayclicker needs to create its virtual mouse and keyboard.
+# This file must sort before 73-seat-late.rules so that "uaccess" takes effect.
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", TAG+="uaccess", OPTIONS+="static_node=uinput"

@@ -1,41 +1,50 @@
+# Binary package: the program is built beforehand (cargo + flutter) and
+# installed with install.sh. Build with packaging/rpm/build_rpm.sh.
+%global debug_package %{nil}
+%global __os_install_post %{nil}
+%global _build_id_links none
+
 Name:           wayclicker
-Version:        0.2.2
+Version:        %{wc_version}
 Release:        1%{?dist}
-Summary:        A powerful, universal autoclicker for Linux (Wayland & X11)
-
-License:        GPLv3
+Summary:        Simple autoclicker for Linux (Wayland and X11)
+License:        GPL-3.0-only
 URL:            https://github.com/Dacraezy1/wayclicker
-Source0:        %{name}-%{version}.tar.gz
-
-BuildRequires:  cargo
-BuildRequires:  rust
-BuildRequires:  gtk3-devel
+ExclusiveArch:  x86_64
+AutoReqProv:    no
 Requires:       gtk3
 Recommends:     polkit
 
 %description
-Wayclicker uses Linux kernel uinput to create a virtual input device, allowing universal mouse and keyboard automation across all Wayland and X11 compositors.
-
-%prep
-%autosetup
-
-%build
-cargo build --release --locked
+Wayclicker clicks or holds mouse buttons and keys on a hotkey. It uses the
+kernel uinput interface, so it works on GNOME, KDE, Hyprland, Sway, X11 and
+every other desktop.
 
 %install
-rm -rf $RPM_BUILD_ROOT
-install -Dpm 0755 target/release/wayclicker %{buildroot}%{_bindir}/wayclicker
-install -Dpm 0644 wayclicker.desktop %{buildroot}%{_datadir}/applications/wayclicker.desktop
-install -Dpm 0644 assets/wayclicker.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/wayclicker.svg
-install -Dpm 0644 packaging/udev/99-wayclicker.rules %{buildroot}%{_udevrulesdir}/99-wayclicker.rules
+rm -rf %{buildroot}
+DESTDIR=%{buildroot} PREFIX=/usr %{wc_src}/install.sh
+
+%post
+modprobe uinput >/dev/null 2>&1 || :
+udevadm control --reload-rules >/dev/null 2>&1 || :
+udevadm trigger --subsystem-match=misc --action=add >/dev/null 2>&1 || :
+update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || :
+gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || :
+
+%postun
+udevadm control --reload-rules >/dev/null 2>&1 || :
+update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || :
 
 %files
-%license LICENSE
-%{_bindir}/wayclicker
-%{_datadir}/applications/wayclicker.desktop
-%{_datadir}/icons/hicolor/scalable/apps/wayclicker.svg
-%{_udevrulesdir}/99-wayclicker.rules
+%license /usr/share/licenses/wayclicker/LICENSE
+/usr/bin/wayclicker
+/usr/bin/wayclicker-gui
+/usr/lib/wayclicker
+/usr/lib/udev/rules.d/60-wayclicker.rules
+/usr/lib/modules-load.d/wayclicker.conf
+/usr/share/applications/wayclicker.desktop
+/usr/share/icons/hicolor/scalable/apps/wayclicker.svg
 
 %changelog
-* Sat Oct 03 2026 Dacraezy1 <https://github.com/Dacraezy1/wayclicker> - 0.1.2-1
-- Initial RPM packaging
+* Tue Nov 10 2026 Dacraezy1 <https://github.com/Dacraezy1/wayclicker> - %{wc_version}-1
+- See https://github.com/Dacraezy1/wayclicker/releases

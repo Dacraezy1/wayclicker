@@ -1,112 +1,162 @@
 name: Build and Release
 
+# Every push and pull request is built and tested.
+# Pushing a tag like v0.3.0 also publishes a GitHub release with:
+#   tar.gz, .deb, .rpm, AppImage, .pkg.tar.zst and SHA256SUMS.
 on:
   push:
-    branches: [ "main", "master" ]
-    tags:
-      - 'v*' 
+    branches: [main, master]
+    tags: ['v*']
   pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-    name: Build Linux Bundle
-    runs-on: ubuntu-latest
-
+    name: Build (tar.gz, deb, rpm, AppImage)
+    runs-on: ubuntu-22.04   # older glibc, so the binaries run on more distros
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    # 1. Install Linux Build Dependencies
-    - name: Install All dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libwayland-dev libxkbcommon-dev
+      - name: Read version from Cargo.toml
+        id: ver
+        run: |
+          VERSION="$(./packaging/version.sh)"
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $VERSION in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-    # 2. Set up Rust
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            libstdc++-12-dev libfuse2 rpm desktop-file-utils
 
-    # 3. Set up Flutter
-    - name: Set up Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
-        cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
-    # 4. Test + build Rust CLI
-    - name: Run Rust tests
-      run: cargo test --locked --verbose
+      - name: Test and build the CLI
+        run: |
+          cargo test --locked
+          cargo build --release --locked
 
-    - name: Build Rust Backend
-      run: cargo build --release --locked --verbose
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
 
-    # 5. Build Flutter GUI
-    - name: Build Flutter Frontend
-      run: |
-        cd gui
-        flutter pub get
-        flutter build linux --release
-        cd ..
+      - name: Test and build the GUI
+        working-directory: gui
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos
+          flutter test
+          flutter build linux --release
 
-    # 6. Bundle everything together
-    - name: Package Release
-      run: |
-        # Create staging directory
-        mkdir -p wayclicker-release
-        
-        # Copy Flutter bundle (binary, libs, data)
-        cp -r gui/build/linux/x64/release/bundle/* wayclicker-release/
-        
-        # Copy Rust binary into the release folder
-        cp target/release/wayclicker wayclicker-release/
-        
-        # Copy installation scripts, desktop integration, and assets
-        cp install.sh wayclicker-release/
-        cp uninstall.sh wayclicker-release/
-        cp wayclicker.desktop wayclicker-release/
-        mkdir -p wayclicker-release/assets
-        cp -r assets/* wayclicker-release/assets/
-        mkdir -p wayclicker-release/packaging
-        cp -r packaging/* wayclicker-release/packaging/
-        
-        # Create Tarball
-        tar -czvf wayclicker-linux-x64.tar.gz wayclicker-release/
+      - name: Check desktop file
+        run: desktop-file-validate wayclicker.desktop
 
-        # Build Debian package (version comes from the tag on release builds)
-        if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-          export VERSION="${GITHUB_REF_NAME#v}"
-        fi
-        ./packaging/debian/build_deb.sh
+      - name: Package tar.gz, deb, rpm and AppImage
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          ./packaging/make_tarball.sh
+          ./packaging/debian/build_deb.sh
+          ./packaging/rpm/build_rpm.sh
+          curl -fsSL -o appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          APPIMAGETOOL="$PWD/appimagetool" ./packaging/appimage/build_appimage.sh
 
-    # 7. Upload Artifacts (For every push)
-    - name: Upload Linux Tarball Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: wayclicker-linux-tarball
-        path: wayclicker-linux-x64.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-build
+          if-no-files-found: error
+          path: |
+            wayclicker-linux-x64.tar.gz
+            *.deb
+            *.rpm
+            *.AppImage
 
-    - name: Upload Debian Package Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: wayclicker-debian-package
-        path: "*.deb"
-        if-no-files-found: warn
+  arch:
+    name: Build Arch package (pkg.tar.zst)
+    needs: build
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
 
-    # 8. Create Release (Only on Tags)
-    - name: Release
-      uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        fail_on_unmatched_files: false
-        generate_release_notes: true
-        files: |
-          wayclicker-linux-x64.tar.gz
-          *.deb
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-build
+          path: dl
+
+      - name: Build with makepkg
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          pacman -Syu --noconfirm --needed base-devel
+          useradd -m builder
+          mkdir /build
+          cp packaging/arch-bin/PKGBUILD packaging/arch-bin/wayclicker.install /build/
+          cp dl/wayclicker-linux-x64.tar.gz /build/
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" /build/PKGBUILD
+          chown -R builder /build
+          su builder -c "cd /build && PKGEXT=.pkg.tar.zst makepkg -f -d --noconfirm"
+          cp /build/*.pkg.tar.zst .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-arch
+          if-no-files-found: error
+          path: "*.pkg.tar.zst"
+
+  nix:
+    name: Check Nix flake
+    runs-on: ubuntu-latest
+    continue-on-error: true   # a Nix problem never blocks a release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Build the command-line package
+        run: nix build .#wayclicker-cli --print-build-logs
+      - name: Build the GUI package (best effort)
+        continue-on-error: true
+        run: nix build .#wayclicker-gui --print-build-logs
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, arch, nix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: release
+
+      - name: Checksums
+        working-directory: release
+        run: sha256sum * > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: release/*

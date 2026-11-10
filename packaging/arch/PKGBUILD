@@ -1,56 +1,25 @@
 # Maintainer: Dacraezy1 <https://github.com/Dacraezy1/wayclicker>
+# Builds the command-line program from source (no GUI). For the GUI use wayclicker-bin.
 pkgname=wayclicker
-pkgver=0.2.2
+pkgver=0.3.0
 pkgrel=1
-pkgdesc="A powerful, universal autoclicker for Linux (Wayland & X11)"
-arch=('x86_64')
+pkgdesc="Simple autoclicker for Linux (Wayland & X11), command line"
+arch=('x86_64' 'aarch64')
 url="https://github.com/Dacraezy1/wayclicker"
-license=('GPL-3.0')
+license=('GPL-3.0-only')
 depends=('glibc')
-makedepends=('cargo' 'git')
-optdepends=(
-    'polkit: for elevated uinput permissions via pkexec'
-)
-provides=('wayclicker')
-conflicts=('wayclicker')
-
-if [ -f "$startdir/../../Cargo.toml" ]; then
-    source=()
-    sha256sums=()
-else
-    source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-    sha256sums=('SKIP')
-fi
-
-_get_source_root() {
-    if [ -f "$startdir/../../Cargo.toml" ]; then
-        echo "$startdir/../.."
-    else
-        echo "$srcdir/$pkgname-$pkgver"
-    fi
-}
+makedepends=('cargo')
+optdepends=('polkit: password prompt when your user cannot access input devices')
+install=wayclicker.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
 
 build() {
-    local src_root
-    src_root="$(_get_source_root)"
-    cd "$src_root"
+    cd "$srcdir/$pkgname-$pkgver"
     cargo build --release --locked
 }
 
 package() {
-    local src_root
-    src_root="$(_get_source_root)"
-
-    # Install CLI binary
-    install -Dm755 "$src_root/target/release/wayclicker" "$pkgdir/usr/bin/wayclicker"
-
-    # Install Desktop Entry & Icon
-    install -Dm644 "$src_root/wayclicker.desktop" "$pkgdir/usr/share/applications/wayclicker.desktop"
-    install -Dm644 "$src_root/assets/wayclicker.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/wayclicker.svg"
-
-    # Install udev rule for uinput access
-    install -Dm644 "$src_root/packaging/udev/99-wayclicker.rules" "$pkgdir/usr/lib/udev/rules.d/99-wayclicker.rules"
-
-    # Install License
-    install -Dm644 "$src_root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    cd "$srcdir/$pkgname-$pkgver"
+    DESTDIR="$pkgdir" PREFIX=/usr ./install.sh
 }

@@ -401,4 +401,32 @@ mod tests {
         }
         assert!(!keys.contains(&KeyCode::KEY_POWER));
     }
+    /// Every name the GUI's "Record" button or key drop-downs can produce
+    /// must be understood by the CLI.
+    #[test]
+    fn every_gui_recorded_name_parses() {
+        let mut names: Vec<String> = Vec::new();
+        names.extend(('A'..='Z').map(|c| c.to_string()));
+        names.extend((0..=9).map(|n| n.to_string()));
+        names.extend((1..=24).map(|n| format!("F{n}")));
+        names.extend((0..=9).map(|n| format!("KP{n}")));
+        for n in [
+            "ENTER", "ESC", "BACKSPACE", "TAB", "SPACE", "minus", "equal", "leftbrace",
+            "rightbrace", "backslash", "semicolon", "apostrophe", "grave", "comma", "dot",
+            "slash", "CAPSLOCK", "printscreen", "scrolllock", "pause", "INSERT", "HOME",
+            "PAGEUP", "DELETE", "END", "PAGEDOWN", "arrowright", "arrowleft", "arrowdown",
+            "arrowup", "numlock", "kpslash", "kpasterisk", "kpminus", "kpplus", "kpenter",
+            "kpdot", "menu", "ctrl", "shift", "alt", "super", "left", "right", "middle",
+            "BTN_SIDE", "BTN_EXTRA",
+        ] {
+            names.push(n.to_string());
+        }
+        for n in &names {
+            assert!(Chord::parse(n, true).is_ok(), "trigger name not parsed: {n}");
+            assert!(Chord::parse(&format!("ctrl+alt+{n}"), true).is_ok(), "combo not parsed: {n}");
+        }
+        for n in names.iter().filter(|n| !matches!(n.as_str(), "middle" | "BTN_SIDE" | "BTN_EXTRA")) {
+            assert!(Chord::parse(n, false).is_ok(), "key name not parsed: {n}");
+        }
+    }
 }

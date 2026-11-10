@@ -254,12 +254,13 @@ class _KeyBindFieldState extends State<KeyBindField> {
     final String held = _orderedMods().join('+');
     final String mouse = widget.allowMouse ? ' or click a mouse button' : '';
     final String prefix = held.isEmpty ? '' : '$held + ';
-    return 'Recording: ${prefix}press a key$mouse... (Esc cancels)';
+    return 'Recording: ${prefix}press a key$mouse (Esc cancels)';
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -272,10 +273,10 @@ class _KeyBindFieldState extends State<KeyBindField> {
                 enabled: !_recording,
                 decoration: InputDecoration(
                   labelText: widget.label,
-                  hintText: 'e.g. F13, ctrl+alt+c',
+                  hintText: 'e.g. F13 or ctrl+alt+c',
                   isDense: true,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
                 onChanged: (v) => widget.onChanged(v.trim()),
@@ -288,14 +289,14 @@ class _KeyBindFieldState extends State<KeyBindField> {
                 _recording
                     ? Icons.stop_circle_outlined
                     : Icons.fiber_manual_record,
-                size: 18,
-                color: _recording ? null : Colors.redAccent,
+                size: 16,
+                color: _recording ? null : colorScheme.error,
               ),
               label: Text(_recording ? 'Cancel' : 'Record'),
             ),
             if (widget.presets.isNotEmpty)
               PopupMenuButton<String>(
-                tooltip: 'Pick from common keys',
+                tooltip: 'Pick from a list',
                 icon: const Icon(Icons.arrow_drop_down_circle_outlined),
                 enabled: !_recording,
                 onSelected: _setValue,
@@ -310,16 +311,16 @@ class _KeyBindFieldState extends State<KeyBindField> {
               ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         Text(
           _recording
               ? _recordingHint
               : (widget.helper ??
-                    'Type any key name or combo joined with +, or press Record.'),
-          style: TextStyle(
-            fontSize: 11,
-            fontStyle: FontStyle.italic,
-            color: _recording ? colorScheme.primary : colorScheme.outline,
+                    'Type a key name, or press Record and then the key.'),
+          style: textTheme.bodySmall?.copyWith(
+            color: _recording
+                ? colorScheme.primary
+                : colorScheme.onSurfaceVariant,
           ),
         ),
       ],

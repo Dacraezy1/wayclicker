@@ -1,10 +1,15 @@
 mod keys;
+mod monitor;
 
 use clap::Parser;
-use evdev::{uinput::VirtualDevice, AttributeSet, EventType, InputEvent, KeyCode};
+use evdev::{
+    uinput::VirtualDevice, AttributeSet, EventType, InputEvent, KeyCode, RelativeAxisCode,
+};
 use keys::{base_virtual_keys, Chord};
+use monitor::{Monitor, TriggerMode, VIRTUAL_DEVICE_NAME};
 use std::{
-    collections::HashSet,
+    fs::{File, OpenOptions},
+    io::BufRead,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -13,26 +18,25 @@ use std::{
     time::Duration,
 };
 
-/// A powerful, universal autoclicker for Linux (Wayland & X11).
-/// Works on GNOME, KDE, Hyprland, and others by using kernel-level uinput.
+/// Universal autoclicker for Linux (Wayland & X11).
+/// Works on every desktop because it uses kernel-level uinput.
 #[derive(Parser, Debug)]
 #[command(author = "Dacraezy1", version, about, long_about = None)]
 struct Args {
-    /// Interval between clicks in milliseconds (autoclick speed)
+    /// Milliseconds between clicks (ignored in hold mode)
     #[arg(short, long, default_value_t = 100)]
     interval: u64,
 
-    /// Key, mouse button or key combination that triggers the autoclicker.
-    /// Any key works, e.g. F6, F13, F21, X, BTN_SIDE, KEY_KPENTER, or a combo
-    /// such as "ctrl+alt+c" or "shift+BTN_SIDE".
+    /// Key, mouse button or combo that starts/stops the autoclicker.
+    /// Examples: F6, F13, X, BTN_SIDE, KEY_KPENTER, ctrl+alt+c, shift+BTN_SIDE
     #[arg(short, long, default_value = "F6")]
     toggle_key: String,
 
-    /// Trigger activation mode: 'hold' (autoclick while held down) or 'toggle' (click to toggle on/off)
+    /// How the trigger behaves: 'toggle' (press to start/stop) or 'hold' (active while held)
     #[arg(long, default_value = "toggle")]
     trigger_mode: String,
 
-    /// Hold-to-click flag: autoclick continuously only while holding down the trigger button/key
+    /// Shorthand for --trigger-mode hold
     #[arg(long, default_value_t = false)]
     hold_to_click: bool,
 
@@ -40,19 +44,19 @@ struct Args {
     #[arg(short, long)]
     button: Option<String>,
 
-    /// Keyboard key or key combination to click or hold (e.g., G, Space, F13, ctrl+c)
+    /// Keyboard key or combo to press (e.g. G, Space, F13, ctrl+c)
     #[arg(short, long)]
     key: Option<String>,
 
-    /// Target button or key (mouse button or key name, e.g., left, right, G, Space)
+    /// Target button or key (mouse button or key name)
     #[arg(long)]
     target: Option<String>,
 
-    /// Virtual action mode: 'click' (repeated clicking at interval) or 'hold' (hold button/key down)
+    /// What to do with the target: 'click' (repeat at --interval) or 'hold' (keep pressed down)
     #[arg(short, long, default_value = "click")]
     mode: String,
 
-    /// Virtual hold flag (shorthand for --mode hold)
+    /// Shorthand for --mode hold
     #[arg(long, default_value_t = false)]
     hold: bool,
 
@@ -60,12 +64,16 @@ struct Args {
     /// (needs no special permissions). Exit code 0 = valid.
     #[arg(long, default_value_t = false)]
     validate: bool,
-}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TriggerMode {
-    Toggle, // Click once to toggle ON, click again to toggle OFF
-    Hold,   // Autoclick while held down, stop as soon as released
+    /// Check whether this user can run Wayclicker without root (access to
+    /// /dev/uinput and /dev/input/event*) and exit. Exit code 0 = yes.
+    #[arg(long, default_value_t = false)]
+    check_access: bool,
+
+    /// Used by the GUI: stop when a line "stop" arrives on stdin or when
+    /// stdin is closed, so a closed GUI never leaves a clicker running.
+    #[arg(long, default_value_t = false)]
+    stdin_control: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,47 +167,7 @@ fn resolve_target(args: &Args, toggle_str: &str) -> Result<ResolvedTarget, Strin
     })
 }
 
-/// State shared between the input-monitor threads.
-struct TriggerState {
-    held: HashSet<KeyCode>,
-    chord_active: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Transition {
-    /// The whole trigger combination just became pressed.
-    Pressed,
-    /// The trigger combination just stopped being pressed.
-    Released,
-}
-
-/// Feed one raw key event (value: 0 = release, 1 = press, 2 = autorepeat) into
-/// the trigger state and report whether the combination changed state.
-fn track_event(
-    st: &mut TriggerState,
-    chord: &Chord,
-    key: KeyCode,
-    value: i32,
-) -> Option<Transition> {
-    match value {
-        0 => {
-            st.held.remove(&key);
-        }
-        1 | 2 => {
-            st.held.insert(key);
-        }
-        _ => return None,
-    }
-    let now_active = chord.is_pressed(&st.held);
-    let was_active = st.chord_active;
-    st.chord_active = now_active;
-    match (was_active, now_active) {
-        (false, true) => Some(Transition::Pressed),
-        (true, false) => Some(Transition::Released),
-        _ => None,
-    }
-}
-
+/// Press (value 1) or release (value 0) every key of the target.
 fn emit_keys(dev: &Arc<Mutex<VirtualDevice>>, codes: &[KeyCode], value: i32) {
     let mut events: Vec<InputEvent> = Vec::with_capacity(codes.len() + 1);
     if value == 0 {
@@ -217,6 +185,25 @@ fn emit_keys(dev: &Arc<Mutex<VirtualDevice>>, codes: &[KeyCode], value: i32) {
     }
 }
 
+/// True when this user can create the virtual device and read input devices.
+fn check_access() -> bool {
+    let uinput_ok = ["/dev/uinput", "/dev/input/uinput"]
+        .iter()
+        .any(|p| OpenOptions::new().write(true).open(p).is_ok());
+    let readable = monitor::event_paths()
+        .iter()
+        .filter(|p| File::open(p).is_ok())
+        .count();
+
+    if !uinput_ok {
+        eprintln!("No write access to /dev/uinput.");
+    }
+    if readable == 0 {
+        eprintln!("No read access to /dev/input/event* (add yourself to the 'input' group).");
+    }
+    uinput_ok && readable > 0
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("Error: {e}");
@@ -224,11 +211,41 @@ fn main() {
     }
 }
 
+fn describe_usage(
+    trigger_mode: TriggerMode,
+    action_mode: ActionMode,
+    trigger: &str,
+    target: &str,
+) -> String {
+    match (trigger_mode, action_mode) {
+        (TriggerMode::Hold, ActionMode::Click) => {
+            format!("HOLD '{trigger}' to autoclick. It stops when you let go.")
+        }
+        (TriggerMode::Toggle, ActionMode::Click) => {
+            format!("TAP '{trigger}' to start autoclicking, tap again to stop.")
+        }
+        (TriggerMode::Hold, ActionMode::Hold) => {
+            format!("HOLD '{trigger}' to keep '{target}' held down. It is released when you let go.")
+        }
+        (TriggerMode::Toggle, ActionMode::Hold) => {
+            format!("TAP '{trigger}' to hold '{target}' down, tap again to release.")
+        }
+    }
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
+    if args.check_access {
+        if check_access() {
+            println!("OK");
+            return Ok(());
+        }
+        std::process::exit(1);
+    }
+
     let trigger_chord = Chord::parse(&args.toggle_key, true)
-        .map_err(|e| format!("Invalid toggle/trigger key '{}': {}", args.toggle_key, e))?;
+        .map_err(|e| format!("Invalid trigger key '{}': {}", args.toggle_key, e))?;
     let target = resolve_target(&args, &args.toggle_key)?;
     let trigger_mode = parse_trigger_mode(&args)?;
     let action_mode = parse_action_mode(&args)?;
@@ -238,168 +255,91 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    println!("======================================================");
-    println!("  Wayclicker Universal Linux Autoclicker (Wayland/X11) ");
-    println!("======================================================");
-    println!(
-        "Trigger Key/Button : {} ({:?})",
-        args.toggle_key, trigger_mode
-    );
-    println!(
-        "Action Target      : {:?} ({})",
-        target.kind, target.name
-    );
-    println!("Action Mode        : {:?}", action_mode);
+    println!("Wayclicker {}", env!("CARGO_PKG_VERSION"));
+    println!("Trigger : {} ({:?})", args.toggle_key, trigger_mode);
+    println!("Target  : {} ({:?})", target.name, target.kind);
     match action_mode {
-        ActionMode::Click => println!("Autoclick Speed    : {}ms interval", args.interval),
-        ActionMode::Hold => println!("Autoclick Speed    : n/a (target is held down, not clicked)"),
+        ActionMode::Click => println!("Action  : click every {} ms", args.interval.max(1)),
+        ActionMode::Hold => println!("Action  : hold down"),
     }
+    println!(
+        "{}",
+        describe_usage(trigger_mode, action_mode, &args.toggle_key, &target.name)
+    );
 
-    match (trigger_mode, action_mode) {
-        (TriggerMode::Hold, ActionMode::Click) => println!(
-            "How to use         : HOLD DOWN '{}' to autoclick. Stops immediately when released.",
-            args.toggle_key
-        ),
-        (TriggerMode::Toggle, ActionMode::Click) => println!(
-            "How to use         : TAP '{}' once to start autoclicking, tap again to stop.",
-            args.toggle_key
-        ),
-        (TriggerMode::Hold, ActionMode::Hold) => println!(
-            "How to use         : HOLD DOWN '{}' to hold '{}' down. Released when you let go.",
-            args.toggle_key, target.name
-        ),
-        (TriggerMode::Toggle, ActionMode::Hold) => println!(
-            "How to use         : TAP '{}' once to hold '{}' down, tap again to release.",
-            args.toggle_key, target.name
-        ),
-    }
-    println!("NOTE: Requires input device permissions (sudo, pkexec, or uinput group).");
-    println!("------------------------------------------------------");
-
-    // Shared state: whether the action loop should be active, and trigger tracking.
+    // Shared state: whether the action loop should be active.
     let clicking_enabled = Arc::new(AtomicBool::new(false));
-    let trigger_state = Arc::new(Mutex::new(TriggerState {
-        held: HashSet::new(),
-        chord_active: false,
-    }));
-
     let running = Arc::new(AtomicBool::new(true));
-    let running_ctrlc = Arc::clone(&running);
-    let running_loop = Arc::clone(&running);
 
-    // Graceful shutdown on SIGINT / SIGTERM / SIGHUP (the GUI's Stop button sends SIGTERM)
+    // Graceful shutdown on SIGINT / SIGTERM / SIGHUP.
+    let running_ctrlc = Arc::clone(&running);
     if let Err(e) = ctrlc::set_handler(move || {
         running_ctrlc.store(false, Ordering::SeqCst);
     }) {
-        eprintln!("Warning: Could not set signal handler: {}", e);
+        eprintln!("Warning: could not set signal handler: {e}");
     }
 
-    // --- Enumerate physical input devices BEFORE creating the virtual device ---
-    let chord_codes = trigger_chord.all_codes();
-    let mut candidate_devices = Vec::new();
-    for (_, d) in evdev::enumerate() {
-        if let Some(name) = d.name() {
-            if name.contains("Wayclicker") {
-                continue;
-            }
-        }
-        if let Some(supported) = d.supported_keys() {
-            if chord_codes.iter().any(|c| supported.contains(*c)) {
-                candidate_devices.push(d);
-            }
-        }
-    }
-
-    // Fallback if no device reported explicit support for the trigger keys
-    if candidate_devices.is_empty() {
-        for (_, d) in evdev::enumerate() {
-            if let Some(name) = d.name() {
-                if name.contains("Wayclicker") {
-                    continue;
+    // The GUI controls us through stdin: "stop" (or a closed pipe) ends the program.
+    if args.stdin_control {
+        let running_stdin = Arc::clone(&running);
+        thread::spawn(move || {
+            let stdin = std::io::stdin();
+            for line in stdin.lock().lines() {
+                match line {
+                    Ok(l) if matches!(l.trim(), "stop" | "quit" | "exit") => break,
+                    Ok(_) => continue,
+                    Err(_) => break,
                 }
             }
-            if d.supported_events().contains(EventType::KEY) {
-                candidate_devices.push(d);
-            }
-        }
+            running_stdin.store(false, Ordering::SeqCst);
+        });
     }
 
-    // --- Virtual Device Creation (uinput) ---
-    let mut keys = AttributeSet::<KeyCode>::new();
+    // --- Virtual device (uinput) ---
+    let mut keys = evdev::AttributeSet::<KeyCode>::new();
     for code in base_virtual_keys() {
         keys.insert(code);
     }
     for code in &target.codes {
         keys.insert(*code);
     }
+    // Pointer axes make desktops treat the device as a real mouse so button
+    // events are always accepted. No movement is ever sent.
+    let mut axes = AttributeSet::<RelativeAxisCode>::new();
+    axes.insert(RelativeAxisCode::REL_X);
+    axes.insert(RelativeAxisCode::REL_Y);
 
-    let virtual_device = VirtualDevice::builder()?
-        .name("Wayclicker Virtual Device")
+    let virtual_device = VirtualDevice::builder()
+        .map_err(|e| format!("Cannot open /dev/uinput: {e}. Run with sudo or see the README (Permissions)."))?
+        .name(VIRTUAL_DEVICE_NAME)
         .with_keys(&keys)?
+        .with_relative_axes(&axes)?
         .build()
-        .map_err(|e| format!("Failed to create virtual device: {}. (Did you run with sudo?)", e))?;
-
+        .map_err(|e| format!("Failed to create virtual device: {e}. Run with sudo or see the README (Permissions)."))?;
     let virtual_device = Arc::new(Mutex::new(virtual_device));
 
-    if candidate_devices.is_empty() {
-        eprintln!("No input device found to monitor for trigger key '{}'.", args.toggle_key);
-        eprintln!("Warning: Monitoring disabled. Ensure you run with appropriate permissions.");
-    } else {
-        for mut device in candidate_devices {
-            let dev_name = device.name().unwrap_or("unnamed").to_string();
-            println!("Monitoring input device: {}", dev_name);
-            let enabled = Arc::clone(&clicking_enabled);
-            let state = Arc::clone(&trigger_state);
-            let run_flag = Arc::clone(&running);
-            let chord = trigger_chord.clone();
-            let trigger_name = args.toggle_key.clone();
-
-            thread::spawn(move || {
-                while run_flag.load(Ordering::Relaxed) {
-                    let events = match device.fetch_events() {
-                        Ok(ev) => ev,
-                        Err(_) => break,
-                    };
-                    for event in events {
-                        let evdev::EventSummary::Key(_, key, value) = event.destructure() else {
-                            continue;
-                        };
-                        let transition = {
-                            let mut st = state.lock().unwrap();
-                            track_event(&mut st, &chord, key, value)
-                        };
-
-                        match trigger_mode {
-                            TriggerMode::Toggle => {
-                                // Fire once each time the whole combination becomes pressed.
-                                if transition == Some(Transition::Pressed) {
-                                    let on = !enabled.load(Ordering::SeqCst);
-                                    enabled.store(on, Ordering::SeqCst);
-                                    println!("Autoclicker toggled: {}", if on { "ON" } else { "OFF" });
-                                }
-                            }
-                            TriggerMode::Hold => {
-                                if transition == Some(Transition::Pressed) {
-                                    enabled.store(true, Ordering::SeqCst);
-                                    println!("Autoclicker: ACTIVE (holding {})", trigger_name);
-                                } else if transition == Some(Transition::Released) {
-                                    enabled.store(false, Ordering::SeqCst);
-                                    println!("Autoclicker: STOPPED (released {})", trigger_name);
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
+    // --- Hotkey monitoring (hot-plug aware) ---
+    let found = monitor::start(Monitor::new(
+        trigger_chord,
+        args.toggle_key.clone(),
+        trigger_mode,
+        Arc::clone(&clicking_enabled),
+        Arc::clone(&running),
+    ));
+    if found == 0 {
+        eprintln!(
+            "Warning: no readable input device found for '{}'. Run with sudo, or add yourself to the 'input' group.",
+            args.toggle_key
+        );
     }
+    println!("Ready.");
 
-    // --- Action Loop (Main Thread) ---
+    // --- Action loop (main thread) ---
     let click_interval = Duration::from_millis(args.interval.max(1));
     let press_duration = Duration::from_millis(5.min(args.interval.max(2) / 2));
     let mut is_pressed = false;
 
-    while running_loop.load(Ordering::Relaxed) {
+    while running.load(Ordering::Relaxed) {
         let enabled = clicking_enabled.load(Ordering::SeqCst);
 
         match action_mode {
@@ -419,19 +359,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     thread::sleep(press_duration);
                     emit_keys(&virtual_device, &target.codes, 0);
 
-                    // Sleep remaining interval in small responsive increments (5ms)
+                    // Wait out the rest of the interval in small steps so
+                    // stopping always feels instant.
                     let sleep_time = click_interval.saturating_sub(press_duration);
-                    if sleep_time > Duration::ZERO {
-                        let step = Duration::from_millis(5);
-                        let mut elapsed = Duration::ZERO;
-                        while elapsed < sleep_time
-                            && clicking_enabled.load(Ordering::SeqCst)
-                            && running_loop.load(Ordering::Relaxed)
-                        {
-                            let to_sleep = (sleep_time - elapsed).min(step);
-                            thread::sleep(to_sleep);
-                            elapsed += to_sleep;
-                        }
+                    let step = Duration::from_millis(5);
+                    let mut elapsed = Duration::ZERO;
+                    while elapsed < sleep_time
+                        && clicking_enabled.load(Ordering::SeqCst)
+                        && running.load(Ordering::Relaxed)
+                    {
+                        let to_sleep = (sleep_time - elapsed).min(step);
+                        thread::sleep(to_sleep);
+                        elapsed += to_sleep;
                     }
                 } else {
                     thread::sleep(Duration::from_millis(5));
@@ -440,12 +379,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Clean exit: ensure target key(s) are released
+    // Clean exit: never leave a key or button stuck down.
     if is_pressed {
         emit_keys(&virtual_device, &target.codes, 0);
     }
 
-    println!("Wayclicker stopped cleanly.");
+    println!("Wayclicker stopped.");
     Ok(())
 }
 
@@ -465,6 +404,8 @@ mod tests {
             mode: "click".to_string(),
             hold: false,
             validate: false,
+            check_access: false,
+            stdin_control: false,
         }
     }
 
@@ -534,53 +475,4 @@ mod tests {
         a.trigger_mode = "bogus".into();
         assert!(parse_trigger_mode(&a).is_err());
     }
-
-    fn run_events(chord: &str, events: &[(KeyCode, i32)]) -> Vec<Option<Transition>> {
-        let chord = Chord::parse(chord, true).unwrap();
-        let mut st = TriggerState { held: HashSet::new(), chord_active: false };
-        events.iter().map(|(k, v)| track_event(&mut st, &chord, *k, *v)).collect()
-    }
-
-    #[test]
-    fn trigger_single_key_f13() {
-        let t = run_events("F13", &[(KeyCode::KEY_F13, 1), (KeyCode::KEY_F13, 2), (KeyCode::KEY_F13, 0)]);
-        assert_eq!(t, vec![Some(Transition::Pressed), None, Some(Transition::Released)]);
-    }
-
-    #[test]
-    fn trigger_ctrl_alt_c_fires_only_when_complete() {
-        let t = run_events("ctrl+alt+c", &[
-            (KeyCode::KEY_LEFTCTRL, 1), (KeyCode::KEY_LEFTALT, 1), (KeyCode::KEY_C, 1), // complete -> Pressed
-            (KeyCode::KEY_C, 2),                                      // autorepeat -> nothing
-            (KeyCode::KEY_C, 0),                                      // released -> Released
-            (KeyCode::KEY_C, 1),                                      // modifiers still held -> Pressed again
-            (KeyCode::KEY_C, 0), (KeyCode::KEY_LEFTALT, 0), (KeyCode::KEY_LEFTCTRL, 0),
-        ]);
-        assert_eq!(t, vec![
-            None, None, Some(Transition::Pressed),
-            None,
-            Some(Transition::Released),
-            Some(Transition::Pressed),
-            Some(Transition::Released), None, None,
-        ]);
-    }
-
-    #[test]
-    fn trigger_partial_combo_never_fires() {
-        let t = run_events("ctrl+alt+c", &[(KeyCode::KEY_LEFTCTRL, 1), (KeyCode::KEY_C, 1), (KeyCode::KEY_C, 0), (KeyCode::KEY_LEFTCTRL, 0)]);
-        assert!(t.iter().all(|x| x.is_none()));
-    }
-
-    #[test]
-    fn trigger_combo_any_press_order() {
-        let t = run_events("ctrl+alt+c", &[(KeyCode::KEY_C, 1), (KeyCode::KEY_RIGHTALT, 1), (KeyCode::KEY_RIGHTCTRL, 1)]);
-        assert_eq!(t, vec![None, None, Some(Transition::Pressed)]);
-    }
-
-    #[test]
-    fn trigger_hold_releases_when_any_part_lifted() {
-        let t = run_events("ctrl+c", &[(KeyCode::KEY_LEFTCTRL, 1), (KeyCode::KEY_C, 1), (KeyCode::KEY_LEFTCTRL, 0)]);
-        assert_eq!(t, vec![None, Some(Transition::Pressed), Some(Transition::Released)]);
-    }
 }
-
